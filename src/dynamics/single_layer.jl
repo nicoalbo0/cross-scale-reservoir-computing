@@ -8,9 +8,9 @@ function generate_reservoir(params::Tuple{Int, T, Int, T, T, T}, input_dimension
     W .*= g / ρ
 
     # input weight matrix
-    W_in_rec   = 2 .* g_in_rec .*rand(N, rec_dimensions) .- 1
-    W_in_neigh = 2 .* g_in_neigh .*rand(N, neigh_dimensions) .- 1
-    W_in_layer = 2 .* g_in_layer .*rand(N, layer_dimensions) .- 1
+    W_in_rec   = g_in_rec .* (2 .* rand(N, rec_dimensions) .- 1)
+    W_in_neigh = g_in_neigh .* (2 .* rand(N, neigh_dimensions) .- 1)
+    W_in_layer = g_in_layer .* (2 .* rand(N, layer_dimensions) .- 1)
     
     return Reservoir{T}(W, W_in_rec, W_in_neigh, W_in_layer)
 end
