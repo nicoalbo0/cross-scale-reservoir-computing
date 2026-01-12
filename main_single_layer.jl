@@ -18,11 +18,15 @@ BLAS.set_num_threads(1)
 # mixing       = 0             | mixing       = 6/12
 # Λ_max        = 0.05          | Λ_max       = 0.09
 
-Q = 32
-L = 22
-μ = 0.0
+Q::Int = 64
+L::Int = 22
+μ = 0.01
+res_divisor::Int = 8;
+Qeffective = div(Q,res_divisor);
 
 data, τ = load_data(Q, L, μ; show_data=false, interpolate_data=false);
+# regrid to lower the resolution
+data = regrid_average(data, res_divisor);
 
 # Experiment configuration
 
@@ -37,12 +41,12 @@ warmup       = 1_000
 M, Ttot = size(data)
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
-res_size     = 5000
+res_size     = 1500
 res_radius   = 0.6
-degree       = 5
-g_in_rec     = 1.0
-g_in_neigh   = 1.0
-g_in_layer   = 1.0
+degree       = 10
+g_in_rec     = 1.0/√(Qeffective/num_networks)
+g_in_neigh   = 0.0
+g_in_layer   = 0.0
 ridge_param  = 1e-4
 
 res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer)
@@ -63,7 +67,7 @@ preds_test, preds_train, train_data , X, _ = run_single_layer(
 
 ## Plotting 
 
-p = plot_train_test_heatmaps(
+p1 = plot_train_test_heatmaps(
     train_data,
     preds_train,
     data,
@@ -72,10 +76,16 @@ p = plot_train_test_heatmaps(
     λ_max = 0.05,
     warmup = warmup,
     train_len = train_len,
-    Q = Q,
+    Q = Qeffective,
     L = L
-)
-display(p)
+);
 
-p = plot(X[1][1:50,:]', label="")
-display(p)
+test_data   = data[:,train_len - warmup + 1 : train_len - warmup + size(preds_test,2)];
+
+error_curve = collect(rmse_upto(test_data, preds_test; T=t) for t in 1:size(test_data, 2))
+
+p2_1 = plot(error_curve, grid=false, lw=2, color=:black, ylabel="rmse_upto", xlabel="timestep", legend=false, title="total err.");
+vline!(p2_1,[warmup, warmup], lw=2, color=:red);
+p2_2 = plot(X[1][1:50,:]', xlabel="timestep", ylabel="node state", label="", title="\nnetwork activity", ylim=(-1, 1), color=:black, alpha=0.25);
+p2 = plot(p2_1, p2_2, layout=(2,1));
+display(plot(p1,p2, layout=grid(1, 2, widths = (2/3, 1/3)), size=(750,500)))

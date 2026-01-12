@@ -17,13 +17,13 @@ BLAS.set_num_threads(1)
 # mixing       = 0             | mixing       = 6/12
 # Λ_max        = 0.05          | Λ_max       = 0.09
 
-Q = 64
-L = 22
+Q = 128
+L = 44
 μ = 0.0
 
 data, τ      = load_data(Q, L, μ; show_data=false, interpolate_data=false);
 #data_c, _    = load_data(Int(Q/4), Int(L/2) , μ; show_data=false, interpolate_data=false);
-div          = 8
+div          = 16
 data_c       = regrid_average(data, div)
 
 # Experiment configuration
@@ -36,14 +36,14 @@ warmup       = 1_000
 M, Ttot = size(data)
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
-res_size     = [5000, 5000]
-res_radius   = [0.6,   0.6]
+res_size     = [1000, 1000]
+res_radius   = [1.2,   0.6]
 degree       = [10,     10]
-g_in_rec     = [1.0,   0.5]
-g_in_neigh   = [0.0,   0.1]
+g_in_rec     = [1.0,   0.3]
+g_in_neigh   = [0.0,   0.3]
 g_in_layer   = [0.0,   0.1]
-ridge_param  = [1e-4, 1e-4]
-num_networks = [1,       2]
+ridge_param  = [1e-2, 1e-4]
+num_networks = [1,       8]
 mixing       = [0,       6]
 
 res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer)

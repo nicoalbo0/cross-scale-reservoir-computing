@@ -22,6 +22,8 @@ export run_single_layer
 export run_multi_layer
 export regrid_average
 
+export rmse_upto
+
 include("types.jl")
 include("utils.jl")
 include("dynamics/single_layer.jl")

@@ -215,3 +215,34 @@ function square_even_rows(XX::Matrix{T}) where T<:Real
     end
     return X
 end
+
+"""
+    rmse_upto(data, pred; T=size(data, 2), coords=axes(data, 1))
+
+Compute RMSE_{t ≤ T} for `data` and `pred` shaped (N × Tfull), where rows are
+coordinates and columns are time samples.
+
+- `T`: prediction horizon (number of time samples included from the start).
+- `coords`: indices of observed coordinates (rows) to include.
+"""
+function rmse_upto(data::AbstractMatrix, pred::AbstractMatrix;
+                   T::Integer = size(data, 2),
+                   coords = axes(data, 1))
+
+    @assert size(data) == size(pred)
+    T′ = min(T, size(data, 2))
+    ncoords = length(coords)
+    @assert ncoords > 0 && T′ > 0
+
+    S = promote_type(eltype(data), eltype(pred))
+    sse = zero(S)
+
+    @inbounds for t in 1:T′
+        for i in coords
+            δ = data[i, t] - pred[i, t]
+            sse += δ * δ
+        end
+    end
+
+    return sqrt(sse / (ncoords * T′))
+end
