@@ -49,7 +49,7 @@ function plot_train_test_heatmaps(
     p_act = heatmap(
         t_plot, s, actual_plot;
         title=tp * "Test Data",
-        c=:jet, clims=clims,
+        c=:RdBu, clims=clims,
         framestyle=:box,
         yticks=false, xticks=false
     )
@@ -57,7 +57,7 @@ function plot_train_test_heatmaps(
     p_pred = heatmap(
         t_plot, s, forecast_plot;
         title=tp * "Test Forecast",
-        c=:jet, clims=clims,
+        c=:RdBu, clims=clims,
         framestyle=:box,
         yticks=false, xticks=false,
         legend=:bottomright
@@ -67,7 +67,7 @@ function plot_train_test_heatmaps(
         t_plot, s, err_plot;
         title=tp * "Test Error",
         xlabel=L"Λt"*" (Lyapunov time)",
-        c=:jet, clims=clims,
+        c=:RdBu, clims=clims,
         framestyle=:box,
         yticks=false,
         legend=:bottomright
@@ -95,7 +95,7 @@ function plot_train_test_heatmaps(
         t_train, s,
         training_data[:, train_plot_start:end];
         title=tp * "Training Data",
-        c=:jet, clims=clims,
+        c=:RdBu, clims=clims,
         colorbar=false, framestyle=:box,
         ylabel=L"x", xticks=false
     )
@@ -104,7 +104,7 @@ function plot_train_test_heatmaps(
         t_train, s,
         training_forecast[:, train_plot_start:end];
         title=tp * "Training Forecast",
-        c=:jet, clims=clims,
+        c=:RdBu, clims=clims,
         colorbar=false, framestyle=:box,
         ylabel=L"x", xticks=false
     )
@@ -114,7 +114,7 @@ function plot_train_test_heatmaps(
         train_err[:, train_plot_start:end];
         title=tp * "Training Error",
         xlabel=L"Λt"*" (Lyapunov time)",
-        c=:jet, clims=clims,
+        c=:RdBu, clims=clims,
         colorbar=false, framestyle=:box,
         ylabel=L"x"
     )
@@ -135,9 +135,10 @@ function plot_train_test_heatmaps(
     return p
 end
 
-function plot_units_activity(X::Vector{Matrix{T}}) where T<:Real
+function plot_units_activity(X::Vector{Matrix{T}}; n_units::Int=100) where T<:Real
 
-    p = plot(X[1][1:50,:]', label="", framestyle=:box, xlabel="Time", ylabel="Unit Activity", ylims=(-1,1))
+    n_skip = round(Int, div(size(X[1],1), n_units));
+    p = plot(X[1][1:n_skip:end,:]', xlabel="timestep", ylabel="Unit Activity", label="", framestyle=:box, ylim=(-1, 1), color=:black, alpha=0.25)
 
     return p
 end

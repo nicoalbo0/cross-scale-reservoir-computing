@@ -1,16 +1,85 @@
+function build_W_in(
+    N::Int,
+    rec_dim::Int,
+    neigh_dim::Int,
+    layer_dim::Int,
+    g_rec::Real,
+    g_neigh::Real,
+    g_layer::Real;
+    mode::Symbol = :structured
+)
+    D = rec_dim + neigh_dim + layer_dim
+    D == 0 && return (
+        zeros(N, 0),
+        zeros(N, 0),
+        zeros(N, 0)
+    )
+
+    @assert mode === :structured || mode === :random
+
+    # global matrix
+    W = zeros(N, D)
+
+    # column-wise gains
+    gains = vcat(
+        fill(g_rec,   rec_dim),
+        fill(g_neigh, neigh_dim),
+        fill(g_layer, layer_dim)
+    )
+
+    # neuron assignment
+    q = div(N, D)
+
+    if mode === :structured
+        # contiguous neuron blocks
+        for j in 1:D
+            rows = (j-1)*q+1 : j*q
+            W[rows, j] .= gains[j] .* (2 .* rand(q) .- 1)
+        end
+
+    else
+        # random permutation of neurons
+        perm = randperm(N)
+        for j in 1:D
+            rows = perm[(j-1)*q+1 : j*q]
+            W[rows, j] .= gains[j] .* (2 .* rand(q) .- 1)
+        end
+    end
+
+    # split by columns (cheap views)
+    i1 = rec_dim
+    i2 = i1 + neigh_dim
+
+    W_rec   = W[:, 1:i1]
+    W_neigh = W[:, i1+1:i2]
+    W_layer = W[:, i2+1:end]
+
+    return W_rec, W_neigh, W_layer
+end
+
 function generate_reservoir(params::Tuple{Int, T, Int, T, T, T}, input_dimensions::Tuple{Int, Int, Int}; input_mode::Symbol) where T<:Real
     N, g, degree, g_in_rec, g_in_neigh, g_in_layer = params
     rec_dimensions, neigh_dimensions, layer_dimensions = input_dimensions
     sparsity = degree / N
 
-    W = sprand(N, N, sparsity)
+    W = sprandn(N, N, sparsity)
     ρ = maximum(abs.(eigvals(Matrix(W))))
     W .*= g / ρ
 
     # input weight matrix
-    W_in_rec   = g_in_rec .* (2 .* rand(N, rec_dimensions) .- 1)
-    W_in_neigh = g_in_neigh .* (2 .* rand(N, neigh_dimensions) .- 1)
-    W_in_layer = g_in_layer .* (2 .* rand(N, layer_dimensions) .- 1)
+    #W_in_rec   = g_in_rec .* (2 .* rand(N, rec_dimensions) .- 1)
+    #W_in_neigh = g_in_neigh .* (2 .* rand(N, neigh_dimensions) .- 1)
+    #W_in_layer = g_in_layer .* (2 .* rand(N, layer_dimensions) .- 1)
+    W_in_rec, W_in_neigh, W_in_layer = build_W_in(
+        N,
+        rec_dimensions,
+        neigh_dimensions,
+        layer_dimensions,
+        g_in_rec,
+        g_in_neigh,
+        g_in_layer;
+        mode = input_mode
+    )
     
     return Reservoir{T}(W, W_in_rec, W_in_neigh, W_in_layer)
 end
@@ -31,7 +100,7 @@ function fit_ridge_regression(X::Matrix{T}, Y::Matrix{T}, ridge::T, washout::Int
 end
 
 function train_parallel_reservoir(
-    res::Reservoir{T},
+    reservoir::Reservoir{T},
     data::Matrix{T},
     data_layer::Matrix{T},
     train_time::Int,
@@ -44,7 +113,7 @@ function train_parallel_reservoir(
     L, _        = size(data)
     num_blocks  = length(blocks)
 
-    N           = size(res.W, 1)
+    N           = size(reservoir.W, 1)
 
     models = Vector{BlockModel{T}}(undef, num_blocks)
     prediction = zeros(T, L, train_time)
@@ -72,10 +141,10 @@ function train_parallel_reservoir(
             u_neigh = data[rows_neigh, t]
             u_layer = data_layer[rows_layer, t]
 
-            mul!(W_x,          res.W,                x)
-            mul!(Win_rec_u,    res.W_in_rec,     u_rec)
-            mul!(Win_neigh_u,  res.W_in_neigh, u_neigh)
-            mul!(Win_layer_u,  res.W_in_layer, u_layer)
+            mul!(W_x,          reservoir.W,                x)
+            mul!(Win_rec_u,    reservoir.W_in_rec,     u_rec)
+            mul!(Win_neigh_u,  reservoir.W_in_neigh, u_neigh)
+            mul!(Win_layer_u,  reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(x)
                 x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
@@ -99,7 +168,7 @@ function train_parallel_reservoir(
 end
 
 function test_parallel_reservoir(
-    res::Reservoir{T},
+    reservoir::Reservoir{T},
     block_models::Vector{BlockModel{T}},
     data::Matrix{T},
     data_layer::Matrix{T},
@@ -110,7 +179,7 @@ function test_parallel_reservoir(
 
     L, Ttot = size(data)
     num_blocks = length(block_models)
-    N = size(res.W, 1)
+    N = size(reservoir.W, 1)
 
     W_x         = zeros(T, N)
     Win_rec_u   = zeros(T, N)
@@ -148,10 +217,10 @@ function test_parallel_reservoir(
             u_neigh = @views data[bm.rows_neigh, t]
             u_layer = @views data_layer[bm.rows_layer, train_time - warmup + col]  # aligned
 
-            mul!(W_x, res.W, bm.x)
-            mul!(Win_rec_u,   res.W_in_rec,   u_rec)
-            mul!(Win_neigh_u, res.W_in_neigh, u_neigh)
-            mul!(Win_layer_u, res.W_in_layer, u_layer)
+            mul!(W_x, reservoir.W, bm.x)
+            mul!(Win_rec_u,   reservoir.W_in_rec,   u_rec)
+            mul!(Win_neigh_u, reservoir.W_in_neigh, u_neigh)
+            mul!(Win_layer_u, reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(bm.x)
                 bm.x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
@@ -181,10 +250,10 @@ function test_parallel_reservoir(
             u_neigh = @views predictions[bm.rows_neigh, warmup + t]
             u_layer = @views data_layer[bm.rows_layer, train_time + t]  # aligned
 
-            mul!(W_x,                res.W,      bm.x)
-            mul!(Win_rec_u,   res.W_in_rec,     u_rec)
-            mul!(Win_neigh_u, res.W_in_neigh, u_neigh)
-            mul!(Win_layer_u, res.W_in_layer, u_layer)
+            mul!(W_x,                reservoir.W,      bm.x)
+            mul!(Win_rec_u,   reservoir.W_in_rec,     u_rec)
+            mul!(Win_neigh_u, reservoir.W_in_neigh, u_neigh)
+            mul!(Win_layer_u, reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(bm.x)
                 bm.x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
@@ -206,7 +275,7 @@ function run_single_layer(
     warmup::Int,
     ridge_parameter::T,
     show_progress::Bool = false,
-    input_mode::Symbol
+    input_mode::Symbol = :structured
 ) where T<:Real
 
     L, Ttot     = size(data)
@@ -215,11 +284,11 @@ function run_single_layer(
     # block input dimension implied by your make_blocks topology
     dimensions = input_dimensions(blocks)
 
-    res = generate_reservoir(params, dimensions; input_mode=input_mode)
+    reservoir = generate_reservoir(params, dimensions; input_mode=input_mode)
 
     block_models, training_prediction, training_data =
         train_parallel_reservoir(
-            res, data, data_layer, train_time, blocks;
+            reservoir, data, data_layer, train_time, blocks;
             washout=washout,
             ridge_parameter=ridge_parameter,
             show_progress=show_progress
@@ -227,7 +296,7 @@ function run_single_layer(
 
     # start test at train_time (with warmup window ending at train_time)
     preds, X = test_parallel_reservoir(
-        res, block_models, data, data_layer, train_time, test_time;
+        reservoir, block_models, data, data_layer, train_time, test_time;
         warmup=warmup
     )
 

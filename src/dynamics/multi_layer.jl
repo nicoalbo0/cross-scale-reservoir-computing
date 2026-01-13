@@ -10,7 +10,9 @@ function run_multi_layer(
     mixing::Vector{Int},
     ridge_parameter::Vector{T},
     div::Int,
-    show_progress::Bool = false
+    show_progress::Bool = false,
+    input_mode::Symbol = :structured,
+    overlap_mode = :exclude
 ) where T<:Real
 
     # --------------------------------------------------
@@ -34,7 +36,7 @@ function run_multi_layer(
             warmup  = warmup,
             ridge_parameter = ridge_parameter[1],
             show_progress = show_progress,
-            input_mode = :structured
+            input_mode = input_mode
         )
 
     # --------------------------------------------------
@@ -48,7 +50,7 @@ function run_multi_layer(
     # --------------------------------------------------
     # 4. Build FINE blocks (hard hierarchy)
     # --------------------------------------------------
-    blocks_fine = make_blocks(size(data, 1), div, num_networks[2], mixing[2], num_networks[1]; overlap_mode = :exclude)
+    blocks_fine = make_blocks(size(data, 1), div, num_networks[2], mixing[2], num_networks[1]; overlap_mode = overlap_mode)
 
     # --------------------------------------------------
     # 5. Run FINE layer

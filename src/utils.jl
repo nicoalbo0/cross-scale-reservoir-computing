@@ -60,6 +60,8 @@ function make_blocks_multilayer(L_f::Int, divisor::Int, n_fine::Int, mixing::Int
     L_c = div(L_f, divisor)
     @assert n_fine % n_coarse == 0
 
+    @assert overlap_mode === :exclude || overlap_mode === :include
+
     # fine blocks (fine index space)
     fine_blocks = make_blocks_single_layer(L_f, n_fine, mixing)
 
