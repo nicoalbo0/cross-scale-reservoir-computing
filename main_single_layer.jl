@@ -7,7 +7,8 @@ using HierarchicalRC
 using LinearAlgebra
 using Plots, Measures, LaTeXStrings
 
-BLAS.set_num_threads(1)
+#BLAS.set_num_threads(1)
+BLAS.set_num_threads(6)
 
 # single network config        | parallel network config
 # dt           = 0.25          | dt           = 0.25
@@ -21,7 +22,7 @@ BLAS.set_num_threads(1)
 Q::Int = 64
 L::Int = 22
 μ = 0.01
-resolution_divisor::Int = 8;
+resolution_divisor::Int = 4;
 Qeffective = div(Q,resolution_divisor);
 
 data, τ = load_data(Q, L, μ; show_data=false, interpolate_data=false);
@@ -41,10 +42,10 @@ warmup       = 1_000
 M, Ttot = size(data)
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
-res_size     = 1500
-res_radius   = 0.9
+res_size     = 1000
+res_radius   = 0.1
 degree       = 10
-g_in_rec     = 1.0/√(Qeffective/num_networks)
+g_in_rec     = 2.5/√(Qeffective/num_networks)
 g_in_neigh   = 0.0
 g_in_layer   = 0.0
 ridge_param  = 1e-4
@@ -61,7 +62,7 @@ preds_test, preds_train, train_data , X, _ = run_single_layer(
     washout = washout,
     warmup = warmup,
     ridge_parameter = ridge_param,
-    show_progress = true,
+    show_progress = false,
     input_mode = :structured
 )
 
