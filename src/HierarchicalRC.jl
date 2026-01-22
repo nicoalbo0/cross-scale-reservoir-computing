@@ -23,6 +23,7 @@ export run_multi_layer
 export regrid_average
 
 export rmse_upto
+export build_W_in
 
 include("types.jl")
 include("utils.jl")

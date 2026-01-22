@@ -19,10 +19,10 @@ BLAS.set_num_threads(6)
 # mixing       = 0             | mixing       = 6/12
 # Λ_max        = 0.05          | Λ_max       = 0.09
 
-Q::Int = 64
-L::Int = 22
+Q = 64
+L = 22
 μ = 0.01
-resolution_divisor::Int = 4;
+resolution_divisor = 4; #4
 Qeffective = div(Q,resolution_divisor);
 
 data, τ = load_data(Q, L, μ; show_data=false, interpolate_data=false);
@@ -67,7 +67,7 @@ preds_test, preds_train, train_data , X, _ = run_single_layer(
 )
 
 ## Plotting 
-
+#=
 p1 = plot_train_test_heatmaps(
     train_data,
     preds_train,
@@ -83,7 +83,7 @@ p1 = plot_train_test_heatmaps(
 
 test_data   = data[:,train_len - warmup + 1 : train_len - warmup + size(preds_test,2)];
 
-error_curve = collect(rmse_upto(test_data, preds_test; T=t) for t in 1:size(test_data, 2));
+error_curve = collect(rmse_upto(test_data[:, warmup:end], preds_test[:, warmup:end]; T=t) for t in 1:size(test_data[:, warmup:end], 2));
 
 p2_1 = plot(error_curve, grid=false, lw=2, color=:black, ylabel="rmse_upto", xlabel="timestep", legend=false, title="Total err.");
 vline!(p2_1,[warmup, warmup], lw=2, color=:red);
@@ -93,3 +93,18 @@ plot!(p2_2, title="Network activity");
 
 p2 = plot(p2_1, p2_2, layout=(2,1));
 display(plot(p1,p2, layout=grid(1, 2, widths = (2/3, 1/3)), size=(750,500)))
+=#
+
+## Plotting Check 2
+test_data   = data[:,train_len - warmup + 1 : train_len - warmup + size(preds_test,2)];
+h1 = heatmap(test_data[:, warmup:end], clim=(-3,3), cmap=:RdBu);
+h2 = heatmap(preds_test[:, warmup:end], clim=(-3,3), cmap=:RdBu);
+h3 = heatmap(test_data[:, warmup:end] - preds_test[:, warmup:end], clim=(-3,3), cmap=:RdBu);
+vline!(h3, [1], lw=2, color=:red, legend=false);
+
+error_curve = collect(rmse_upto(test_data[:, warmup:end], preds_test[:, warmup:end]; T=t) for t in 1:size(test_data[:, warmup:end], 2));
+
+p1 = plot(error_curve, grid=false, lw=2, color=:black, ylabel="rmse_upto", xlabel="timestep", legend=false, title="Total err.");
+#vline!(p1,[warmup, warmup], lw=2, color=:red);
+
+display(plot(h1,h2,h3,p1, size=(800,500)))

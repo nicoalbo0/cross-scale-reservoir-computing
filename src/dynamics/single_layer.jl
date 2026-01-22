@@ -148,6 +148,9 @@ function train_parallel_reservoir(
 
             @inbounds for k in eachindex(x)
                 x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
+
+                #x[k] = (1 - reservoir.leaking_rate) .* x[k] + reservoir.leaking_rate .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k]) # adding leaking rate
+
             end
 
             # target is u_rec at time t+1
