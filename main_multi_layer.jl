@@ -8,9 +8,9 @@ using LinearAlgebra, Measures
 using Plots
 
 using Random
-Random.seed!(1)
+#Random.seed!(1)
 
-BLAS.set_num_threads(1)
+BLAS.set_num_threads(6)
 
 
 # single network config        | parallel network config
@@ -23,7 +23,7 @@ BLAS.set_num_threads(1)
 
 Q = 128
 L = 44
-μ = 0.0
+μ = 0.01
 
 data, τ      = load_data(Q, L, μ; show_data=false, interpolate_data=false);
 #data_c, _    = load_data(Int(Q/4), Int(L/2) , μ; show_data=false, interpolate_data=false);
@@ -41,14 +41,14 @@ M, Ttot = size(data)
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
 num_networks = [4,       8]
-mixing       = [2,       4]
-res_size     = [250, 250]
-res_radius   = [0.15,   0.15]
+mixing       = [2,       2]
+res_size     = [1000, 1000]
+res_radius   = [0.1,   0.6]
 degree       = [10,     10]
-g_in_rec     = [2.5/√(div(Q,resolution_divisor_upper_layer)/num_networks[1]),   2.0 /√(Q/num_networks[2])]
-g_in_neigh   = [2.0/√(mixing[1]),   2.0/√(mixing[2])]
-g_in_layer   = [0.0,   0.001/√(div(Q,resolution_divisor_upper_layer)/num_networks[2])]
-ridge_param  = [1e-4, 1e-4]
+g_in_rec     = [2.5/√(div(Q,resolution_divisor_upper_layer)/num_networks[1]),   1.0 /√(Q/num_networks[2])]
+g_in_neigh   = [2.5/√(mixing[1]),   2.0/√(mixing[2])]
+g_in_layer   = [0.0,   2.0/√(div(Q,resolution_divisor_upper_layer)/num_networks[2])]
+ridge_param  = [1e-5, 1e0]
 
 res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer)
 
@@ -66,7 +66,7 @@ preds_fine, preds_coarse, train_pred_fine, train_pred_coarse, train_data_coarse,
     show_progress = false,
     div = resolution_divisor_upper_layer,
     input_mode = :structured, # :random, :structured,
-    overlap_mode = :include # :exclude, :include
+    overlap_mode = :exclude # :exclude, :include
 )
 
 ## Plotting
