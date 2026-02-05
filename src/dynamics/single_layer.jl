@@ -17,42 +17,38 @@ function build_W_in(
 
     @assert mode === :structured || mode === :random
 
-    # global matrix
-    W = zeros(N, D)
+    if mode == :structured
 
-    # column-wise gains
-    gains = vcat(
-        fill(g_rec,   rec_dim),
-        fill(g_neigh, neigh_dim),
-        fill(g_layer, layer_dim)
-    )
+        # global matrix
+        W = zeros(N, D)
 
-    # neuron assignment
-    q = div(N, D)
+            gains = vcat(
+            fill(g_rec,   rec_dim),
+            fill(g_neigh, neigh_dim),
+            fill(g_layer, layer_dim)
+        )
 
-    if mode === :structured
         # contiguous neuron blocks
         for j in 1:D
             rows = (j-1)*q+1 : j*q
             W[rows, j] .= gains[j] .* (2 .* rand(q) .- 1)
         end
 
-    else
-        # random permutation of neurons
-        perm = randperm(N)
-        for j in 1:D
-            rows = perm[(j-1)*q+1 : j*q]
-            W[rows, j] .= gains[j] .* (2 .* rand(q) .- 1)
-        end
+        # split by columns (cheap views)
+        i1 = rec_dim
+        i2 = i1 + neigh_dim
+
+        W_rec   = W[:, 1:i1]
+        W_neigh = W[:, i1+1:i2]
+        W_layer = W[:, i2+1:end]
+
+    elseif mode == :random
+
+        W_rec   = g_in_rec .* (2 .* rand(N, rec_dimensions) .- 1)
+        W_neigh = g_in_neigh .* (2 .* rand(N, neigh_dimensions) .- 1)
+        W_layer = g_in_layer .* (2 .* rand(N, layer_dimensions) .- 1)
     end
 
-    # split by columns (cheap views)
-    i1 = rec_dim
-    i2 = i1 + neigh_dim
-
-    W_rec   = W[:, 1:i1]
-    W_neigh = W[:, i1+1:i2]
-    W_layer = W[:, i2+1:end]
 
     return W_rec, W_neigh, W_layer
 end
@@ -67,9 +63,6 @@ function generate_reservoir(params::Tuple{Int, T, Int, T, T, T, T, T}, input_dim
     W .*= g / ρ
 
     # input weight matrix
-    #W_in_rec   = g_in_rec .* (2 .* rand(N, rec_dimensions) .- 1)
-    #W_in_neigh = g_in_neigh .* (2 .* rand(N, neigh_dimensions) .- 1)
-    #W_in_layer = g_in_layer .* (2 .* rand(N, layer_dimensions) .- 1)
     W_in_rec, W_in_neigh, W_in_layer = build_W_in(
         N,
         rec_dimensions,
