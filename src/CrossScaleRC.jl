@@ -1,4 +1,4 @@
-module HierarchicalRC
+module CrossScaleRC
 
 using Statistics
 using Random
@@ -31,4 +31,4 @@ include("dynamics/single_layer.jl")
 include("dynamics/multi_layer.jl")
 include("plots.jl")
 
-end # module HierarchicalRC
+end # module CrossScaleRC

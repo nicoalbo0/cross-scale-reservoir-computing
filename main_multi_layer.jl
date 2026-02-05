@@ -3,7 +3,7 @@ using Pkg, Revise
 Pkg.activate(".")
 Pkg.instantiate()
 
-using HierarchicalRC
+using CrossScaleRC
 using LinearAlgebra, Measures
 using Plots
 
@@ -25,7 +25,7 @@ Q = 128
 L = 44
 μ = 0.01
 
-data, τ      = load_data(Q, L, μ; show_data=false, interpolate_data=false);
+data, tau      = load_data(Q, L, μ; show_data=false, interpolate_data=false);
 #data_c, _    = load_data(Int(Q/4), Int(L/2) , μ; show_data=false, interpolate_data=false);
 resolution_divisor_upper_layer          = 4
 data_c       = regrid_average(data, resolution_divisor_upper_layer)
@@ -49,8 +49,10 @@ g_in_rec     = [2.5/√(div(Q,resolution_divisor_upper_layer)/num_networks[1]), 
 g_in_neigh   = [2.5/√(mixing[1]),   2.0/√(mixing[2])]
 g_in_layer   = [0.0,   2.0/√(div(Q,resolution_divisor_upper_layer)/num_networks[2])]
 ridge_param  = [1e-5, 1e0]
+dt           = [0.25, 0.25]
+τ            = [0.25, 0.25]
 
-res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer)
+res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt)
 
 preds_fine, preds_coarse, train_pred_fine, train_pred_coarse, train_data_coarse, train_data_fine, data_coarse, X_coarse, X_fine = run_multi_layer(
     res_params,
@@ -66,7 +68,8 @@ preds_fine, preds_coarse, train_pred_fine, train_pred_coarse, train_data_coarse,
     show_progress = false,
     div = resolution_divisor_upper_layer,
     input_mode = :structured, # :random, :structured,
-    overlap_mode = :exclude # :exclude, :include
+    overlap_mode = :exclude, # :exclude, :include
+    regression_mode = [:linear, :quadratic]
 )
 
 ## Plotting
@@ -77,7 +80,7 @@ p_coarse =
         train_pred_coarse,
         data_coarse,
         preds_coarse;
-        τ = τ,
+        τ = tau,
         λ_max = 0.05,
         warmup = warmup,
         train_len = train_len,
@@ -96,7 +99,7 @@ p_fine =
         train_pred_fine,
         data,
         preds_fine;
-        τ = τ,
+        τ = tau,
         λ_max = 0.05,
         warmup = warmup,
         train_len = train_len,

@@ -57,8 +57,8 @@ function build_W_in(
     return W_rec, W_neigh, W_layer
 end
 
-function generate_reservoir(params::Tuple{Int, T, Int, T, T, T}, input_dimensions::Tuple{Int, Int, Int}; input_mode::Symbol) where T<:Real
-    N, g, degree, g_in_rec, g_in_neigh, g_in_layer = params
+function generate_reservoir(params::Tuple{Int, T, Int, T, T, T, T, T}, input_dimensions::Tuple{Int, Int, Int}; input_mode::Symbol) where T<:Real
+    N, g, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt = params
     rec_dimensions, neigh_dimensions, layer_dimensions = input_dimensions
     sparsity = degree / N
 
@@ -80,20 +80,26 @@ function generate_reservoir(params::Tuple{Int, T, Int, T, T, T}, input_dimension
         g_in_layer;
         mode = input_mode
     )
+
+    dt_τ = dt/τ
     
-    return Reservoir{T}(W, W_in_rec, W_in_neigh, W_in_layer)
+    return Reservoir{T}(W, dt_τ, W_in_rec, W_in_neigh, W_in_layer)
 end
 
-function fit_ridge_regression(X::Matrix{T}, Y::Matrix{T}, ridge::T, washout::Int) where T<:AbstractFloat
+function fit_ridge_regression(X::Matrix{T}, Y::Matrix{T}, ridge::T, washout::Int; mode::Symbol = :linear) where T<:AbstractFloat
     X_cut = X[:, washout+1:end]
     Y = Y[:, washout+1:end]
     N = size(X, 1)
 
-    X = square_even_rows(X_cut)
+    if mode == :quadratic
+        X = square_even_rows(X_cut)
+
+    else mode == :linear
+        X = X_cut
+    end
 
     I_N = Matrix{T}(I, N, N)
     XX = Symmetric(X * X' + ridge * I_N)
-    #W_out = (Y * X') * LinearAlgebra.inv!(cholesky(XX))
     W_out = (Y * X') / cholesky(XX)
 
     return W_out
@@ -107,7 +113,8 @@ function train_parallel_reservoir(
     blocks::Vector{BlockType};
     washout::Int,
     ridge_parameter::T,
-    show_progress::Bool = false
+    show_progress::Bool = false,
+    regression_mode::Symbol = :quadratic
 ) where T<:AbstractFloat
 
     L, _        = size(data)
@@ -147,9 +154,8 @@ function train_parallel_reservoir(
             mul!(Win_layer_u,  reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(x)
-                x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
-
-                #x[k] = (1 - reservoir.leaking_rate) .* x[k] + reservoir.leaking_rate .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k]) # adding leaking rate
+                #x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k]) discrete
+                x[k] = (1 - reservoir.dt_τ) .* x[k] + reservoir.dt_τ .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k]) # adding leaking rate
 
             end
 
@@ -157,7 +163,7 @@ function train_parallel_reservoir(
             Y[:, t] .= @views data[rows_rec, t]
         end
 
-        W_out = fit_ridge_regression(X, Y, ridge_parameter, washout)
+        W_out = fit_ridge_regression(X, Y, ridge_parameter, washout; mode = regression_mode)
 
         models[i] = BlockModel{T}(W_out, x, rows_rec, rows_neigh, rows_layer)
         prediction[rows_rec, :] .= W_out * square_even_rows(X)
@@ -177,7 +183,8 @@ function test_parallel_reservoir(
     data_layer::Matrix{T},
     train_time::Int,
     test_time::Int;
-    warmup::Int
+    warmup::Int,
+    regression_mode::Symbol = :quadratic
 ) where T<:Real
 
     L, Ttot = size(data)
@@ -226,7 +233,8 @@ function test_parallel_reservoir(
             mul!(Win_layer_u, reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(bm.x)
-                bm.x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
+                #bm.x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
+                bm.x[k] = (1 - reservoir.dt_τ) .* bm.x[k] + reservoir.dt_τ .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
             end
         end
     end
@@ -239,9 +247,13 @@ function test_parallel_reservoir(
             X[i][:, warmup + t] .= bm.x
 
             z = copy(bm.x)
-            for k in 2:2:length(z)
-                z[k] = z[k]^2
+
+            if regression_mode == :quadratic
+                for k in 2:2:length(z)
+                    z[k] = z[k]^2
+                end
             end
+
             y = bm.W_out * z
             block_outputs[i] = y
             predictions[bm.rows_rec, warmup + t] .= y
@@ -259,7 +271,8 @@ function test_parallel_reservoir(
             mul!(Win_layer_u, reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(bm.x)
-                bm.x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
+                #bm.x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
+                bm.x[k] = (1 - reservoir.dt_τ) .* bm.x[k] + reservoir.dt_τ .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
             end
         end
     end
@@ -268,7 +281,7 @@ function test_parallel_reservoir(
 end
 
 function run_single_layer(
-    params::Tuple{Int, T, Int, T, T, T},
+    params::Tuple{Int, T, Int, T, T, T, T, T},
     data::Matrix{T},
     data_layer::Matrix{T},
     train_time::Int,
@@ -278,7 +291,8 @@ function run_single_layer(
     warmup::Int,
     ridge_parameter::T,
     show_progress::Bool = false,
-    input_mode::Symbol = :structured
+    input_mode::Symbol = :structured,
+    regression_mode::Symbol = :quadratic
 ) where T<:Real
 
     L, Ttot     = size(data)
@@ -294,13 +308,14 @@ function run_single_layer(
             reservoir, data, data_layer, train_time, blocks;
             washout=washout,
             ridge_parameter=ridge_parameter,
-            show_progress=show_progress
+            show_progress=show_progress,
+            regression_mode=regression_mode
         )
 
     # start test at train_time (with warmup window ending at train_time)
     preds, X = test_parallel_reservoir(
         reservoir, block_models, data, data_layer, train_time, test_time;
-        warmup=warmup
+        warmup=warmup, regression_mode=regression_mode
     )
 
     return preds, training_prediction, training_data, X, block_models

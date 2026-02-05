@@ -1,5 +1,5 @@
 function run_multi_layer(
-    params::Tuple{Vector,Vector,Vector,Vector,Vector,Vector},
+    params::Tuple{Vector,Vector,Vector,Vector,Vector,Vector,Vector,Vector},
     data::Matrix{T},
     data_coarse::Matrix{T},
     train_time::Int,
@@ -12,7 +12,8 @@ function run_multi_layer(
     div::Int,
     show_progress::Bool = false,
     input_mode::Symbol = :structured,
-    overlap_mode = :exclude
+    overlap_mode = :exclude,
+    regression_mode = Vector{Symbol}
 ) where T<:Real
 
     # --------------------------------------------------
@@ -36,7 +37,8 @@ function run_multi_layer(
             warmup  = warmup,
             ridge_parameter = ridge_parameter[1],
             show_progress = show_progress,
-            input_mode = input_mode
+            input_mode = input_mode,
+            regression_mode = regression_mode[1]
         )
 
     # --------------------------------------------------
@@ -67,7 +69,8 @@ function run_multi_layer(
             warmup  = warmup,
             ridge_parameter = ridge_parameter[2],
             show_progress = show_progress,
-            input_mode = :structured
+            input_mode = :structured,
+            regression_mode = regression_mode[2]
         )
 
     return (

@@ -3,7 +3,7 @@ using Pkg, Revise
 Pkg.activate(".")
 Pkg.instantiate()
 
-using HierarchicalRC
+using CrossScaleRC
 using LinearAlgebra
 using Plots, Measures, LaTeXStrings
 
@@ -21,7 +21,7 @@ BLAS.set_num_threads(6)
 
 Q0 = 128
 L = 44
-μ = 0.01
+μ = 0.0
 
 resolution_divisor = 4; #4
 Q = div(Q0,resolution_divisor);
@@ -49,8 +49,10 @@ g_in_rec     = 2.5/√(Q/num_networks)
 g_in_neigh   = 2.5/√(mixing)
 g_in_layer   = 0.0
 ridge_param  = 1e-5
+dt           = 0.25
+τ            = 0.25
 
-res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer)
+res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, dt, τ)
 
 preds_test, preds_train, train_data , X, _ = run_single_layer(
     res_params,
@@ -63,7 +65,8 @@ preds_test, preds_train, train_data , X, _ = run_single_layer(
     warmup = warmup,
     ridge_parameter = ridge_param,
     show_progress = false,
-    input_mode = :structured
+    input_mode = :structured,
+    regression_mode = :quadratic, #or linear
 )
 
 ## Plotting 

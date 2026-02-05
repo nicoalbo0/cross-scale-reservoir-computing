@@ -4,7 +4,7 @@ project_root = @__DIR__ # 1. Get the directory of the current script
 Pkg.activate(project_root)
 Pkg.instantiate()
 
-using HierarchicalRC
+using CrossScaleRC
 using ReservoirComputing
 using LinearAlgebra
 using Plots, Measures, LaTeXStrings

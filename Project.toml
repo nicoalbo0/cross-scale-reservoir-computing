@@ -1,4 +1,4 @@
-name = "HierarchicalRC"
+name = "CrossScaleRC"
 uuid = "ad7fa110-6354-4f83-a0e9-63f5579099cc"
 authors = ["nicoalbo0 <105462305+nicoalbo0@users.noreply.github.com>"]
 version = "0.1.0"

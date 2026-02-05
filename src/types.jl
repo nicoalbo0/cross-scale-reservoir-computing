@@ -7,6 +7,7 @@ end
 
 struct Reservoir{T<:Real}
     W::SparseMatrixCSC{T,Int}
+    dt_τ::T
     W_in_rec::Matrix{T}             
     W_in_neigh::Matrix{T}
     W_in_layer::Matrix{T}
