@@ -60,4 +60,52 @@
     @test length(models) == length(blocks)
     @test length(X) == length(blocks)
     @test size(train_pred, 2) == train_time
+
+    # regression_mode = :quadratic (default for train)
+    preds_q, train_pred_q, _, X_q, _ = run_single_layer(
+        res_params,
+        data,
+        data_layer,
+        train_time,
+        test_time,
+        blocks;
+        washout = washout,
+        warmup = warmup,
+        ridge_parameter = ridge,
+        show_progress = false,
+        input_mode = :structured,
+        regression_mode = :quadratic,
+    )
+    @test size(preds_q, 2) == test_time + warmup
+    @test length(X_q) == length(blocks)
+
+    # fit_ridge_regression directly (:linear and :quadratic)
+    N_res = 30
+    T_train = 100
+    wash = 5
+    rows_rec = blocks[1].rows_rec
+    X_fit = randn(N_res, T_train)
+    Y_fit = randn(length(rows_rec), T_train)
+    W_lin = CrossScaleRC.fit_ridge_regression(X_fit, Y_fit, Float64(ridge), wash; mode = :linear)
+    @test size(W_lin, 1) == size(Y_fit, 1)
+    @test size(W_lin, 2) == N_res
+    W_quad = CrossScaleRC.fit_ridge_regression(X_fit, Y_fit, Float64(ridge), wash; mode = :quadratic)
+    @test size(W_quad) == size(W_lin)
+
+    # show_progress = true (smoke test)
+    preds_p, _, _, _, _ = run_single_layer(
+        res_params,
+        data,
+        data_layer,
+        train_time,
+        test_time,
+        blocks;
+        washout = washout,
+        warmup = warmup,
+        ridge_parameter = ridge,
+        show_progress = true,
+        input_mode = :structured,
+        regression_mode = :linear,
+    )
+    @test size(preds_p, 1) == L
 end

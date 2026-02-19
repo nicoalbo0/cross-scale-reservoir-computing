@@ -55,10 +55,3 @@ struct BlockModel{T<:Real}
     rows_neigh::Vector{Int}
     rows_layer::Vector{Int}
 end
-
-"""
-    BlockType
-
-Named tuple type for a single block: `rows_rec`, `rows_neigh`, and `rows_layer` index ranges/vectors.
-"""
-const BlockType = @NamedTuple{rows_rec::UnitRange{Int64}, rows_neigh::Vector{Int64}, rows_layer::Vector{Int64}}

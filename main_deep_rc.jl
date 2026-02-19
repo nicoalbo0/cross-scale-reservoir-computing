@@ -3,7 +3,6 @@ using Pkg, Revise
 Pkg.activate(".")
 
 using CrossScaleRC
-using ReservoirComputing
 using LinearAlgebra
 using Plots, Measures, LaTeXStrings
 using Random, Statistics

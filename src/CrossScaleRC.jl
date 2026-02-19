@@ -35,7 +35,6 @@ export load_data
 export make_blocks
 export regrid_average
 
-
 export run_single_layer
 export run_multi_layer
 export DeepESN, DeepESN_train!, DeepESN_test_closed_loop
