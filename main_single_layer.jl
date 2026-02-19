@@ -7,8 +7,7 @@ using CrossScaleRC
 using LinearAlgebra
 using Plots, Measures, LaTeXStrings
 
-#BLAS.set_num_threads(1)
-BLAS.set_num_threads(6)
+BLAS.set_num_threads(1)
 
 # single network config        | parallel network config
 # dt           = 0.25          | dt           = 0.25
@@ -25,7 +24,8 @@ L = 44
 
 resolution_divisor = 4; #4
 Q = div(Q0,resolution_divisor);
-data, τ = load_data(Q0, L, μ; show_data=false, interpolate_data=false);
+data, τ = load_data(Q0, L, μ; show_data=false, refinement=1);
+
 # regrid to lower the resolution
 data = regrid_average(data, resolution_divisor);
 
@@ -52,7 +52,7 @@ ridge_param  = 1e-5
 dt           = 0.25
 τ            = 0.25
 
-res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, dt, τ)
+res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt)
 
 preds_test, preds_train, train_data , X, _ = run_single_layer(
     res_params,

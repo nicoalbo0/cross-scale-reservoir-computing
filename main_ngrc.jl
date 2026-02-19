@@ -8,20 +8,16 @@ using CrossScaleRC
 using LinearAlgebra
 using Plots
 
-include(joinpath(project_root, "src", "ngrc_utils.jl"))
+BLAS.set_num_threads(1)
 
-BLAS.set_num_threads(Threads.nthreads())
-
-# -------------------------------------------------------------------
 # Data
-# -------------------------------------------------------------------
 Q = 128
 L = 44
 μ = 0.01
 resolution_divisor = 4
 Qeffective = div(Q, resolution_divisor)
 
-data, τ = load_data(Q, L, μ; show_data=false, interpolate_data=false)
+data, τ = load_data(Q, L, μ; show_data=false, refinement=1)
 data = regrid_average(data, resolution_divisor)
 
 # Experiment configuration
@@ -33,9 +29,7 @@ M, Ttot = size(data)
 washout + train_len + predict_len + 2 ≤ Ttot || error("Not enough data")
 
 
-# -------------------------------------------------------------------
 # Run NextGen
-# -------------------------------------------------------------------
 past   = 3      # number of past values (k)
 degree = 2      # polynomial degree (p)
 ridge  = 1e-2

@@ -1,32 +1,23 @@
 # Activate environment
 using Pkg, Revise
-project_root = @__DIR__ # 1. Get the directory of the current script
-Pkg.activate(project_root)
-Pkg.instantiate()
+Pkg.activate(".")
 
 using CrossScaleRC
 using LinearAlgebra, Measures
 using Plots
 using Random
-
-include(joinpath(project_root, "src", "gridsearch_utils.jl"))
-
-BLAS.set_num_threads(Threads.nthreads())
-
-##
 using DelimitedFiles
 
-# ---------------------------
-# Experiment setup
-# ---------------------------
+BLAS.set_num_threads(1)
 
+# Experiment setup
 Q0 = 128
 L = 44
 μ = 0.01
 
 resolution_divisor = 4
 Q = div(Q0, resolution_divisor)
-data, τ = load_data(Q0, L, μ; show_data=false, interpolate_data=false)
+data, τ = load_data(Q0, L, μ; show_data=false, refinement=1)
 data = regrid_average(data, resolution_divisor)
 
 num_networks = 4
@@ -40,9 +31,13 @@ warmup       = 1_000
 M, Ttot = size(data)
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
+# τ, dt for reservoir (fixed or from data)
+τ_default = 0.25
+dt_default = 0.25
+
 function run_once(params)
     res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, ridge_param = params
-    res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer)
+    res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, τ_default, dt_default)
 
     preds_test, _, _, _, _ = run_single_layer(
         res_params,
@@ -82,19 +77,7 @@ function run_once_grid(p)
     return run_once(params)
 end
 
-# ---------------------------
-# Define the scalar grids you want to scan
-# ---------------------------
-
-# Baseline example values you gave:
-# res_size     = 500
-# res_radius   = 0.1
-# degree       = 10
-# g_in_rec     = 2.5/sqrt(Q/num_networks)
-# g_in_neigh   = 2.5/sqrt(mixing)
-# g_in_layer   = 0.0
-# ridge_param  = 1e-5
-
+# Scalar grid definition
 grids = Dict(
     :res_size    => [300],
     :res_radius  => [0.1, 0.5],

@@ -1,33 +1,23 @@
 # Activate environment
 using Pkg, Revise
-project_root = @__DIR__ # 1. Get the directory of the current script
-Pkg.activate(project_root)
-Pkg.instantiate()
+Pkg.activate(".")
 
 using CrossScaleRC
 using LinearAlgebra, Measures
 using Plots
 using Random
-
-include(joinpath(project_root, "src", "deeprc_utils.jl"))
-include(joinpath(project_root, "src", "gridsearch_utils.jl"))
-
-BLAS.set_num_threads(Threads.nthreads())
-
-##
 using DelimitedFiles
 
-# ---------------------------
-# Experiment setup
-# ---------------------------
+BLAS.set_num_threads(1)
 
+# Experiment setup
 Q0 = 128
 L = 44
 μ = 0.01
 
 resolution_divisor = 4
 Q = div(Q0, resolution_divisor)
-data, τ = load_data(Q0, L, μ; show_data=false, interpolate_data=false)
+data, τ = load_data(Q0, L, μ; show_data=false, refinement=1)
 data = regrid_average(data, resolution_divisor)
 
 washout      = 1_000
@@ -58,7 +48,7 @@ function run_once(params)
         sparsity = reservoir_params[:sparsity],
     )
 
-    train!(deep_rc, input_data, target_data;
+    DeepESN_train!(deep_rc, input_data, target_data;
         washout = washout,
         ridge = reservoir_params[:ridge_param],
     )
@@ -66,7 +56,7 @@ function run_once(params)
     test_start_idx = train_len - warmup + 1
     warmup_u = data[:, test_start_idx:(test_start_idx + warmup - 1)]
 
-    preds_test = test_closed_loop(deep_rc;
+    preds_test = DeepESN_test_closed_loop(deep_rc;
         steps = predict_len,
         warmup = warmup_u,
         reset_state = true,
@@ -84,9 +74,7 @@ function run_once(params)
     return error_grid
 end
 
-# ---------------------------
 # Baseline + wrapper that builds (nr, nl, reservoir_params)
-# ---------------------------
 
 base_reservoir_params(nr) = Dict(
     :radius => 0.1,

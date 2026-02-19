@@ -4,62 +4,67 @@ Pkg.activate(".")
 Pkg.instantiate()
 
 using CrossScaleRC
-using LinearAlgebra, Measures
-using Plots
+using LinearAlgebra
+using Plots, Measures, LaTeXStrings
 
 BLAS.set_num_threads(1)
 
-# single network config        | parallel network config
-# Q            = 64            | Q            = 512
-# L            = 22            | L            = 200
-# μ            = 0.0/0.01      | μ            = 0.0/0.01
-# num_networks = 1             | num_networks = 64
-# mixing       = 0             | mixing       = 6/12
-# Λ_max        = 0.05          | Λ_max       = 0.09
+data, tau = load_data([18.0, 6.0]; show_data=true, refinement=3);
+coarse = data[1];
+fine   = data[2];
 
-Q = 128
-L = 44
-μ = 0.01
+grids = [
+    (2,1),   # coarse layer → 2 blocks in longitude
+    (6,3)    # fine layer → 16 blocks
+]
 
-data, tau      = load_data(Q, L, μ; show_data=false, refinement=1);
+mixing = 2
+blocks_layers = make_blocks(data, grids, mixing)
 
-#data_c, _    = load_data(Int(Q/4), Int(L/2) , μ; show_data=false, interpolate_data=false);
-resolution_divisor_upper_layer          = 4
-coarse         = regrid_average(data, resolution_divisor_upper_layer)
-fine           = data
+blocks_coarse = blocks_layers[1]
+blocks_fine   = blocks_layers[2]
+
+# flattening
+nlon_c, nlat_c, Ttot = size(coarse)
+nlon_f, nlat_f, _    = size(fine)
+
+coarse_mat = reshape(coarse, nlon_c*nlat_c, Ttot)
+fine_mat   = reshape(fine,   nlon_f*nlat_f, Ttot)
+
 # Experiment configuration
 
 washout      = 1_000
-train_len    = 50_000
+train_len    = 30_000
 predict_len  = 1_000
 warmup       = 1_000
 
-M, Ttot = size(data)
+_, _, Ttot = size(data[1])
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
-num_networks = [4,       8]
+# hyperparameters
+rec1, neigh1, layer1 = input_dimensions(blocks_coarse)
+rec2, neigh2, layer2 = input_dimensions(blocks_fine)
+
+num_networks = [2,      18]
 mixing       = [2,       2]
-res_size     = [1000, 1000]
-res_radius   = [0.1,   0.6]
+res_size     = [1250, 1250]
+res_radius   = [0.4,   0.8]
 degree       = [10,     10]
-g_in_rec     = [2.5/√(div(Q,resolution_divisor_upper_layer)/num_networks[1]),   1.0 /√(Q/num_networks[2])]
-g_in_neigh   = [2.5/√(mixing[1]),   2.0/√(mixing[2])]
-g_in_layer   = [0.0,   2.0/√(div(Q,resolution_divisor_upper_layer)/num_networks[2])]
-ridge_param  = [1e-5, 1e0]
-dt           = [0.25, 0.25]
-τ            = [0.25, 0.25]
+g_in_rec     = [1.0/√rec1,    1.0/√rec2]
+g_in_neigh   = [1.0/√neigh1,  1.0/√neigh2]
+g_in_layer   = [0.0,          1.0/√layer2]
+ridge_param  = [1e-1, 1e0]
+dt           = [1.0, 1.0]
+τ            = [1.0, 1.0]
 
 res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt)
-
-blocks_coarse = make_blocks(size(coarse, 1), num_networks[1], mixing[1])
-blocks_fine   = make_blocks(size(data, 1), resolution_divisor_upper_layer, num_networks[2], mixing[2], num_networks[1]; overlap_mode = :exclude)
 
 blocks = [blocks_coarse, blocks_fine]
 
 preds_fine, preds_coarse, train_pred_fine, train_pred_coarse, train_data_coarse, train_data_fine, data_coarse, X_coarse, X_fine = run_multi_layer(
     res_params,
-    fine,
-    coarse,
+    fine_mat,
+    coarse_mat,
     train_len,
     predict_len,
     blocks;
@@ -77,18 +82,19 @@ p_coarse =
     plot_train_test_heatmaps(
         train_data_coarse,
         train_pred_coarse,
-        data_coarse,
+        coarse_mat,
         preds_coarse;
         τ = tau,
         λ_max = 0.05,
         warmup = warmup,
         train_len = train_len,
-        Q = Int(round(Q / resolution_divisor_upper_layer)),
-        L = Int(round(L / resolution_divisor_upper_layer)),
-        title_prefix = "Layer 1"
+        Q = size(coarse_mat, 1),
+        L = size(coarse_mat, 1),
+        title_prefix = "Layer 1",
+        clims=(-3, 3)
     );
 
-test_coarse   = data_coarse[:,train_len - warmup + 1 : train_len - warmup + size(preds_coarse,2)];
+test_coarse   = coarse_mat[:,train_len - warmup + 1 : train_len - warmup + size(preds_coarse,2)];
 error_curve_coarse = collect(rmse_upto(test_coarse[:, warmup:end], preds_coarse[:, warmup:end]; T=t) for t in 1:size(test_coarse[:, warmup:end], 2));
 
 
@@ -96,17 +102,18 @@ p_fine =
     plot_train_test_heatmaps(
         train_data_fine,
         train_pred_fine,
-        data,
+        fine_mat,
         preds_fine;
         τ = tau,
         λ_max = 0.05,
         warmup = warmup,
         train_len = train_len,
-        Q = Q,
-        L = L,
-        title_prefix = "Layer 2"
+        Q = size(fine_mat, 1),
+        L = size(fine_mat, 1),
+        title_prefix = "Layer 2",
+        clims=(-3, 3)
     );
-test_fine   = data[:,train_len - warmup + 1 : train_len - warmup + size(preds_fine,2)];
+test_fine   = fine_mat[:,train_len - warmup + 1 : train_len - warmup + size(preds_fine,2)];
 error_curve_fine = collect(rmse_upto(test_fine[:, warmup:end], preds_fine[:, warmup:end]; T=t) for t in 1:size(test_fine[:, warmup:end], 2));
 
 #--

@@ -1,3 +1,2 @@
-data/
-
-.DS_store
+data/kuramoto/*
+data/sst/*

@@ -1,33 +1,23 @@
 # Activate environment
 using Pkg, Revise
-project_root = @__DIR__ # 1. Get the directory of the current script
-Pkg.activate(project_root)
-Pkg.instantiate()
+Pkg.activate(".")
 
 using CrossScaleRC
 using LinearAlgebra, Measures
 using Plots
 using Random
-
-include(joinpath(project_root, "src", "ngrc_utils.jl"))
-include(joinpath(project_root, "src", "gridsearch_utils.jl"))
-
-BLAS.set_num_threads(Threads.nthreads())
-
-##
 using DelimitedFiles
 
-# ---------------------------
-# Experiment setup
-# ---------------------------
+BLAS.set_num_threads(1)
 
+# Experiment setup
 Q0 = 128
 L = 44
 μ = 0.01
 
 resolution_divisor = 4
 Q = div(Q0, resolution_divisor)
-data, τ = load_data(Q0, L, μ; show_data=false, interpolate_data=false)
+data, τ = load_data(Q0, L, μ; show_data=false, refinement=1)
 data = regrid_average(data, resolution_divisor)
 
 # Experiment configuration
@@ -61,9 +51,7 @@ function run_once(params)
     return error_grid
 end
 
-# ---------------------------
 # Choose grids + wrapper
-# ---------------------------
 grids = Dict(
     :past   => [1, 2, 3, 4],
     :degree => [1, 2],

@@ -3,10 +3,13 @@
 #   - past = k (number of past values, i.e. delay taps, skip s=1)
 #   - degree = p (polynomial degree)
 # -------------------------------------------------------------------
-using LinearAlgebra
 
-# Generate all index-multisets of length k from 1:n (combinations with repetition).
-# Returned as a Vector{Vector{Int}} where each vector is nondecreasing.
+"""
+    combs_with_repetition(n, k)
+
+Generate all combinations with repetition of length `k` from 1:n (multisets).
+Returned as a `Vector{Vector{Int}}` where each inner vector is nondecreasing.
+"""
 function combs_with_repetition(n::Int, k::Int)
     out = Vector{Vector{Int}}()
     buf = Vector{Int}(undef, k)
@@ -26,8 +29,13 @@ function combs_with_repetition(n::Int, k::Int)
     return out
 end
 
+"""
+    feature_length(nlin, degree)
+
+Number of polynomial features: 1 (constant) + nlin (linear) + sum over p=2:degree of
+binomial(nlin+p-1, p) for polynomial terms.
+"""
 function feature_length(nlin::Int, degree::Int)
-    # 1 constant + nlin linear + sum_{p=2..degree} binomial(nlin+p-1, p)
     f = 1 + nlin
     for p in 2:degree
         f += binomial(nlin + p - 1, p)
@@ -35,9 +43,15 @@ function feature_length(nlin::Int, degree::Int)
     return f
 end
 
+"""
+    fill_features!(ϕ, xhist, poly_combos)
+
+Fill feature vector `ϕ` from delay embedding `xhist` (M×past; col 1 = current, col 2 = t-1, ...)
+and polynomial index sets `poly_combos`. Constant, linear, then polynomial monomials.
+"""
 function fill_features!(
     ϕ::Vector{Float64},
-    xhist::Matrix{Float64},          # size (M, past), col 1 is current, col 2 previous, ...
+    xhist::Matrix{Float64},
     poly_combos::Vector{Vector{Vector{Int}}}
 )
     M, past = size(xhist)
@@ -71,6 +85,13 @@ function fill_features!(
     return ϕ
 end
 
+"""
+    nextgen_closedloop(data, train_len, predict_len; washout=0, past=2, degree=2, ridge=1e-6)
+
+Next-Generation Reservoir Computing (NG-RC): polynomial features on delay embedding,
+ridge regression for one-step delta, then closed-loop prediction. Returns
+`(preds_test, preds_train, Wout, Φ)`.
+"""
 function nextgen_closedloop(
     data::AbstractMatrix{<:Real},
     train_len::Int,

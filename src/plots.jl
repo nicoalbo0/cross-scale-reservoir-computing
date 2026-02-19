@@ -1,3 +1,11 @@
+"""
+    plot_train_test_heatmaps(training_data, training_forecast, data, forecast; τ, λ_max, warmup, train_len, Q, L, ...)
+
+Produce a two-panel figure: training (data, forecast, error) and test (data, forecast, error) as heatmaps
+in Lyapunov time. `data` and `forecast` are the test segment (ground truth and prediction); the function
+slices `data` using `train_len` and `warmup` to align with `forecast`. Optional: `n_lyap_train`,
+`n_lyap_test`, `n_lyap_warm`, `clims`, `title_prefix`.
+"""
 function plot_train_test_heatmaps(
     training_data::AbstractMatrix,
     training_forecast::AbstractMatrix,
@@ -135,6 +143,11 @@ function plot_train_test_heatmaps(
     return p
 end
 
+"""
+    plot_units_activity(X; n_units=100)
+
+Plot a subsample of reservoir unit activations from the first block's state matrix `X[1]`.
+"""
 function plot_units_activity(X::Vector{Matrix{T}}; n_units::Int=100) where T<:Real
 
     n_skip = round(Int, div(size(X[1],1), n_units));

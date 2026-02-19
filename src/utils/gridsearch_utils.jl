@@ -1,19 +1,14 @@
-# ========================================================= #
-# Grid search
-# ========================================================= #
-using DelimitedFiles, LinearAlgebra
-
 # Keep vector-/tuple-valued parameters in a *single* CSV cell.
+using DelimitedFiles, LinearAlgebra
 _cell(x) = (x isa AbstractArray || x isa Tuple || x isa NamedTuple) ? repr(x) : x
 
 """
-    grid_search(run_once, grids; nrep=20, outfile="grid.csv",
-                param_order=collect(keys(grids)), error_names=nothing, progress=true)
+    grid_search(run_once, grids; nrep=20, outfile="grid.csv", param_order=..., error_names=nothing, progress=true)
 
-- `grids` maps parameter name => a vector of candidate values; each candidate can itself be
-  a scalar, vector, tuple, etc.
-- `run_once(params)` must return a vector/tuple of numeric errors (fixed length across reps).
-- Writes CSV with columns: params..., mean_<err_i>, std_<err_i>.
+Cartesian grid search over `grids` (Dict mapping parameter name => vector of values).
+`run_once(params)` receives a `NamedTuple` and must return a vector/tuple of numeric errors
+(fixed length across reps). Writes CSV with columns: param columns..., mean_<err_i>, std_<err_i>.
+`param_order` controls column order; `error_names` names the error metrics.
 """
 function grid_search(run_once, grids::AbstractDict{Symbol,<:AbstractVector};
     nrep::Integer = 20,
@@ -79,7 +74,7 @@ function grid_search(run_once, grids::AbstractDict{Symbol,<:AbstractVector};
         push!(rows, row)
     end
 
-    # writedlm supports “iterable collection of iterable rows”. [page:0]
+    # writedlm supports "iterable collection of iterable rows".
     writedlm(outfile, rows, ',')
 
     return nothing

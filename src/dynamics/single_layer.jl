@@ -1,3 +1,12 @@
+"""
+    build_W_in(N, rec_dim, neigh_dim, layer_dim, g_rec, g_neigh, g_layer; mode=:structured)
+
+Build input weight matrices (W_in_rec, W_in_neigh, W_in_layer) for the reservoir.
+- `mode=:structured`: one contiguous block of neurons per input dimension, scaled by gains.
+- `mode=:random`: intended to build random full matrices with the given dimensions and gains;
+  the current implementation has a bug (undefined variables in that branch).
+Returns `(W_in_rec, W_in_neigh, W_in_layer)`.
+"""
 function build_W_in(
     N::Int,
     rec_dim::Int,
@@ -29,6 +38,7 @@ function build_W_in(
         )
 
         # contiguous neuron blocks
+        q = div(N, D)
         for j in 1:D
             rows = (j-1)*q+1 : j*q
             W[rows, j] .= gains[j] .* (2 .* rand(q) .- 1)
@@ -53,6 +63,12 @@ function build_W_in(
     return W_rec, W_neigh, W_layer
 end
 
+"""
+    generate_reservoir(params, input_dimensions; input_mode=:structured)
+
+Build a `Reservoir`: sparse recurrent matrix (spectral radius from params), input weights
+via `build_W_in`, and dt_τ = dt/τ. `params` = (N, g, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt).
+"""
 function generate_reservoir(params::Tuple{Int, T, Int, T, T, T, T, T}, input_dimensions::Tuple{Int, Int, Int}; input_mode::Symbol) where T<:Real
     N, g, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt = params
     rec_dimensions, neigh_dimensions, layer_dimensions = input_dimensions
@@ -79,6 +95,13 @@ function generate_reservoir(params::Tuple{Int, T, Int, T, T, T, T, T}, input_dim
     return Reservoir{T}(W, dt_τ, W_in_rec, W_in_neigh, W_in_layer)
 end
 
+"""
+    fit_ridge_regression(X, Y, ridge, washout; mode=:linear)
+
+Ridge regression readout: use columns from `washout+1` to end of X and Y; optionally apply
+`square_even_rows` to the trimmed X when `mode=:quadratic`. Solves (X X' + ridge*I) W_out' = X Y'.
+Returns `W_out` with size (size(Y,1) × size(X,1)), i.e. output dimension × reservoir size.
+"""
 function fit_ridge_regression(X::Matrix{T}, Y::Matrix{T}, ridge::T, washout::Int; mode::Symbol = :linear) where T<:AbstractFloat
     X_cut = X[:, washout+1:end]
     Y = Y[:, washout+1:end]
@@ -98,12 +121,20 @@ function fit_ridge_regression(X::Matrix{T}, Y::Matrix{T}, ridge::T, washout::Int
     return W_out
 end
 
+"""
+    train_parallel_reservoir(reservoir, data, data_layer, train_time, blocks; washout, ridge_parameter, ...)
+
+Train one readout per block in parallel (teacher forcing). Each block uses local + neighbor + layer
+inputs at time t; target at column t is local (recurrent) state at time t; X[:, t] is the reservoir
+state before the update at t. Returns `(models, prediction, data[:, 1:train_time])`.
+Optional: `show_progress`, `regression_mode` (`:linear` or `:quadratic`).
+"""
 function train_parallel_reservoir(
     reservoir::Reservoir{T},
     data::Matrix{T},
     data_layer::Matrix{T},
     train_time::Int,
-    blocks::Vector{BlockType};
+    blocks::Vector{<:NamedTuple};
     washout::Int,
     ridge_parameter::T,
     show_progress::Bool = false,
@@ -169,6 +200,13 @@ function train_parallel_reservoir(
     return models, prediction, data[:, 1:train_time]
 end
 
+"""
+    test_parallel_reservoir(reservoir, block_models, data, data_layer, train_time, test_time; warmup, ...)
+
+Run closed-loop prediction: warmup with true data from (train_time - warmup) to train_time,
+then autonomous prediction for `test_time` steps. Layer input uses true coarse data.
+Returns `(predictions, X)` where X is the list of state matrices per block.
+"""
 function test_parallel_reservoir(
     reservoir::Reservoir{T},
     block_models::Vector{BlockModel{T}},
@@ -273,13 +311,19 @@ function test_parallel_reservoir(
     return predictions, X
 end
 
+"""
+    run_single_layer(params, data, data_layer, train_time, test_time, blocks; washout, warmup, ridge_parameter, ...)
+
+Full single-layer pipeline: build reservoir, train block readouts, run test. Returns
+`(preds, training_prediction, training_data, X, block_models)`.
+"""
 function run_single_layer(
     params::Tuple{Int, T, Int, T, T, T, T, T},
     data::Matrix{T},
     data_layer::Matrix{T},
     train_time::Int,
     test_time::Int,
-    blocks::Vector{BlockType};
+    blocks::Vector{<:NamedTuple};
     washout::Int,
     warmup::Int,
     ridge_parameter::T,

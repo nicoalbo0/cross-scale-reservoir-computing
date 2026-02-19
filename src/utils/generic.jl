@@ -26,7 +26,7 @@ end
 Temporally interpolate `data` (L×T) with cubic splines. New time step is `dt/refinement`;
 returns (L×T_new) matrix.
 """
-function cubic_time_interpolate(data::Matrix{T}, dt::Real, refinement::Int) where T<:Real
+function cubic_time_interpolate(data::Matrix{T}, dt::T, refinement::Int) where T<:Real
     L, t = size(data)
 
     t_coarse = (0:t-1) .* dt

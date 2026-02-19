@@ -1,35 +1,27 @@
 # Activate environment
 using Pkg, Revise
-project_root = @__DIR__ # 1. Get the directory of the current script
-Pkg.activate(project_root)
-Pkg.instantiate()
+Pkg.activate(".")
 
 using CrossScaleRC
-using LinearAlgebra, Measures
-using Plots
+using LinearAlgebra
+using Plots, Measures
 using Random
-
-include(joinpath(project_root, "src", "gridsearch_utils.jl"))
-
-#BLAS.set_num_threads(1)
-##
 using DelimitedFiles
 
-# ---------------------------
-# Experiment setup
-# ---------------------------
+BLAS.set_num_threads(1)
 
+# Experiment setup
 Q0 = 128
 L = 44
 μ = 0.01
 
 resolution_divisor = 1
 Q = div(Q0, resolution_divisor)
-data, τ = load_data(Q0, L, μ; show_data=false, interpolate_data=false)
-data = regrid_average(data, resolution_divisor)
+data, τ = load_data(Q0, L, μ; show_data=false, refinement=1)
+fine = regrid_average(data, resolution_divisor)
 
 resolution_divisor_upper_layer = 4
-data_c = regrid_average(data, resolution_divisor_upper_layer)
+coarse = regrid_average(data, resolution_divisor_upper_layer)
 
 washout     = 1_000
 train_len   = 50_000
@@ -39,26 +31,36 @@ warmup      = 1_000
 M, Ttot = size(data)
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
+num_networks = [4, 8]
+mixing = [2, 2]
+
+blocks_coarse = make_blocks(size(coarse, 1), num_networks[1], mixing[1])
+blocks_fine   = make_blocks(size(fine, 1), resolution_divisor_upper_layer, num_networks[2], mixing[2], num_networks[1]; overlap_mode = :exclude)
+
+blocks = [blocks_coarse, blocks_fine]
+
+# Per-layer τ, dt for reservoir
+τ_default = [0.25, 0.25]
+dt_default = [0.25, 0.25]
+
 function run_once(params)
     res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, ridge_param = params
-    res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer)
+    res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, τ_default, dt_default)
 
     preds_fine, preds_coarse, train_pred_fine, train_pred_coarse,
     train_data_coarse, train_data_fine, data_coarse, X_coarse, X_fine = run_multi_layer(
         res_params,
-        data,
-        data_c,
+        fine,
+        coarse,
         train_len,
-        predict_len;
+        predict_len,
+        blocks;
         washout = washout,
         warmup = warmup,
-        num_networks = num_networks,
-        mixing = mixing,
         ridge_parameter = ridge_param,
         show_progress = false,
-        div = resolution_divisor_upper_layer,
         input_mode = :structured,
-        overlap_mode = :exclude,
+        regression_mode = [:quadratic, :quadratic],
     )
 
     test_fine = data[:, train_len - warmup + 1 : train_len - warmup + size(preds_fine, 2)]
@@ -71,13 +73,8 @@ function run_once(params)
     return error_grid
 end
 
-# ---------------------------
+
 # Baseline vector params (length-2) + grids for only the [2] entries
-# ---------------------------
-
-num_networks = [4, 8]
-mixing = [2, 2]
-
 base = (
     res_size   = [1000, 1000],
     res_radius = [0.1,  0.6],

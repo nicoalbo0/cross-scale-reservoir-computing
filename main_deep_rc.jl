@@ -1,8 +1,6 @@
 # Activate environment
 using Pkg, Revise
-project_root = @__DIR__ # 1. Get the directory of the current script
-Pkg.activate(project_root)
-Pkg.instantiate()
+Pkg.activate(".")
 
 using CrossScaleRC
 using ReservoirComputing
@@ -11,16 +9,9 @@ using Plots, Measures, LaTeXStrings
 using Random, Statistics
 using SparseArrays
 
-include(joinpath(project_root, "src", "deeprc_utils.jl"))
-
 # Set threading
-BLAS.set_num_threads(6)
+BLAS.set_num_threads(1)
 
-# ============================================================================
-# Main Script
-# ============================================================================
-
-##
 # Data parameters
 println("Loading KS data...")
 Q0 = 64
@@ -29,7 +20,7 @@ L = 22
 resolution_divisor = 4
 Q = div(Q0, resolution_divisor)
 
-data, τ = load_data(Q0, L, μ; show_data=false, interpolate_data=false)
+data, τ = load_data(Q0, L, μ; show_data=false, refinement=1)
 # regrid to lower the resolution
 data = regrid_average(data, resolution_divisor)
 
@@ -56,9 +47,7 @@ reservoir_params = Dict(
     :ridge_param => 1e-4
 )
 
-# ============================================================================
-# TRAINING PHASE
-# ============================================================================
+# Training phase
 input_data = data[:, 1:(washout + train_len - 1)]
 target_data = data[:, 2:(washout + train_len)]
 
@@ -88,7 +77,7 @@ deep_rc = DeepESN(nu, ny;
 )
 
 println("\\nTraining readout...")
-preds_train = train!(deep_rc, input_data, target_data;
+preds_train = DeepESN_train!(deep_rc, input_data, target_data;
     washout = washout,
     ridge = reservoir_params[:ridge_param],
     reset_state = true,
@@ -97,16 +86,13 @@ preds_train = train!(deep_rc, input_data, target_data;
 
 println("\\nDeep RC architecture built successfully!")
 
-# ============================================================================
 # TESTING PHASE
-# ============================================================================
-##
 println("Generating test predictions...")
 test_start_idx = train_len - warmup + 1    # = 49_001
 warmup_u = data[:, test_start_idx:(test_start_idx + warmup - 1)]
 
 # Now predict
-preds_test = test_closed_loop(deep_rc;
+preds_test = DeepESN_test_closed_loop(deep_rc;
     steps = predict_len,
     warmup = warmup_u,
     reset_state = true

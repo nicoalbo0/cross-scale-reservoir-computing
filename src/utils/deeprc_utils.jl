@@ -1,16 +1,10 @@
-# ============================================================================
-# UTILITY FUNCTIONS: Feature Augmentation (quadratic style)
-# ============================================================================
-using LinearAlgebra
-using SparseArrays
+"""
+    augment_features(x)
 
+Augment feature vector with quadratic terms (square_even_rows pattern).
+Input: [x₁, x₂, x₃, x₄, ...] → Output: [x₁, x₂², x₃, x₄², ...].
+"""
 function augment_features(x::AbstractVector)
-    """
-    Augment feature vector with quadratic terms (square_even_rows pattern).
-    Input:  [x₁, x₂, x₃, x₄, ...]
-    Output: [x₁, x₂², x₃, x₄², ...]
-
-    """
     x_aug = copy(x)
     for k in 2:2:length(x_aug)
         x_aug[k] = x_aug[k]^2
@@ -18,26 +12,26 @@ function augment_features(x::AbstractVector)
     return x_aug
 end
 
+"""
+    augment_features!(x_aug, x)
+
+In-place augmentation: x_aug[1] = x[1], x_aug[2] = x[2]², etc. Assumes `x_aug` is
+pre-allocated and same length as `x`. More efficient than allocating a new vector.
+"""
 function augment_features!(x_aug::AbstractVector, x::AbstractVector)
-    """
-    In-place augmentation: x_aug[1] = x[1], x_aug[2] = x[2]², etc.
-    Assumes x_aug is pre-allocated and same length as x.
-    More efficient than allocating new vector each time.
-    """
     copyto!(x_aug, x)
     for k in 2:2:length(x_aug)
         x_aug[k] = x_aug[k]^2
     end
 end
 
-function augment_features_matrix(X::AbstractMatrix)
-    """
-    Augment feature matrix column-by-column (square_even_rows pattern).
-    
-    Input:  X with shape (N, T) where each column is [x₁; x₂; ...; xₙ]
-    Output: X_aug with shape (N, T) where column t: [x₁; x₂²; x₃; x₄²; ...]
+"""
+    augment_features_matrix(X)
 
-    """
+Augment feature matrix column-by-column (square_even_rows pattern). X is (N×T);
+each column becomes [x₁; x₂²; x₃; x₄²; ...]. Returns (N×T) matrix.
+"""
+function augment_features_matrix(X::AbstractMatrix)
     X_aug = copy(X)
     N, T = size(X_aug)
     for t in 1:T
@@ -52,6 +46,12 @@ end
 # DeepESN with Quadratic Feature Augmentation
 # ============================================================================
 
+"""
+    DeepESN
+
+Deep Echo State Network: multiple recurrent layers, quadratic feature augmentation
+for readout. Fields: `nu`, `ny`, `nl`, `nr`, `Win`, `Wrec`, `leak`, `x`, `tmp`, `Wout`, `x_aug`.
+"""
 mutable struct DeepESN
     nu::Int # input dim.
     ny::Int # out dim.
@@ -66,6 +66,12 @@ mutable struct DeepESN
     x_aug::Vector{Float64}            # buffer for augmented state vector
 end
 
+"""
+    DeepESN(nu, ny; nl=3, nr=100, rho=0.9, leak=1.0, input_scale=1.0, inter_scale=1.0, sparsity=0.01, rng=...)
+
+Construct a DeepESN with `nu` inputs, `ny` outputs, `nl` layers, `nr` units per layer.
+Recurrent matrices scaled to `rho`; optional `rng` for reproducibility.
+"""
 function DeepESN(nu::Integer, ny::Integer;
         nl::Integer = 3,
         nr::Integer = 100,
@@ -116,8 +122,13 @@ function DeepESN(nu::Integer, ny::Integer;
     return DeepESN(nu, ny, nl, nr, Win, Wrec, leak_v, x, tmp, Wout, x_aug)
 end
 
-# Training with feature augmentation
-function train!(m::DeepESN, U::AbstractMatrix, Y::AbstractMatrix;
+"""
+    DeepESN_train!(m, U, Y; washout=0, ridge=1e-6, reset_state=true, return_output=false)
+
+Train DeepESN readout on inputs `U` and targets `Y` using ridge regression on
+augmented states. If `return_output=true`, returns predicted Y over the full sequence.
+"""
+function DeepESN_train!(m::DeepESN, U::AbstractMatrix, Y::AbstractMatrix;
         washout::Integer = 0,
         ridge::Real = 1e-6,
         reset_state::Bool = true,
@@ -195,8 +206,13 @@ function train!(m::DeepESN, U::AbstractMatrix, Y::AbstractMatrix;
     return nothing
 end
 
-# Testing with feature augmentation
-function test_closed_loop(m::DeepESN;
+"""
+    test_closed_loop(m; steps, warmup=zeros(nu,0), y_init=nothing, reset_state=true)
+
+Run closed-loop prediction for `steps` steps. Optional `warmup` matrix (nu×Tw) and
+`y_init` for first feedback. Returns (ny × (Tw+steps)) prediction matrix.
+"""
+function DeepESN_test_closed_loop(m::DeepESN;
         steps::Integer,
         warmup::AbstractMatrix = zeros(m.nu, 0),
         y_init = nothing,
