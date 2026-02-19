@@ -63,17 +63,20 @@ println("="^70 * "\\n")
 
 # Build and train DeepESN
 rng = MersenneTwister(42)
-
+rho_val = Float64(reservoir_params[:radius])
+leak_val = Float64(reservoir_params[:leaky_coeff])
+input_scale_val = Float64(reservoir_params[:input_scale])
+sparsity_val = Float64(reservoir_params[:sparsity])
 
 deep_rc = DeepESN(nu, ny;
     nl = nl,
     nr = nr,
-    rho = reservoir_params[:radius],
-    leak = reservoir_params[:leaky_coeff],
-    input_scale = reservoir_params[:input_scale],
+    rho = rho_val,
+    leak = leak_val,
+    input_scale = input_scale_val,
     inter_scale = 1.0,
-    sparsity = reservoir_params[:sparsity],
-    rng = rng
+    sparsity = sparsity_val,
+    rng = rng,
 )
 
 println("\\nTraining readout...")

@@ -37,7 +37,7 @@ function cubic_time_interpolate(data::Matrix{T}, dt::T, refinement::Int) where T
     data_interp = zeros(T, L, length(t_fine))
 
     for i in 1:L
-        itp = CubicSplineInterpolation(
+        itp = cubic_spline_interpolation(
             t_coarse,
             data[i, :];
             extrapolation_bc = Line()  # safe for edges

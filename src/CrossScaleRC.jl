@@ -52,7 +52,7 @@ export grid_search
 include("types.jl")
 include("data/loading.jl")
 include("data/grids.jl")
-include("utils.jl")
+include("utils/generic.jl")
 include("utils/deeprc_utils.jl")
 include("utils/ngrc_utils.jl")
 include("utils/gridsearch_utils.jl")
