@@ -80,27 +80,3 @@ These are the main entry points for running experiments.
 | **main_sst.jl** | Two-layer RC on **sea surface temperature** data. Loads multi-resolution SST via `load_data([18.0, 6.0]; ...)`, builds 2D blocks with `make_blocks(data, grids, mixing)`, flattens to matrices, and runs `run_multi_layer` (coarse + fine) with 2D block structure. |
 
 All main scripts set up data, hyperparameters, and (where applicable) blocks, then call the appropriate high-level API (`run_single_layer`, `run_multi_layer`, `DeepESN_*`, `nextgen_closedloop`). Tuning and grid-search are handled by the `run_tuning_*.jl` scripts.
-
----
-
-## Testing
-
-Run the test suite from the project root:
-
-```bash
-julia --project=. -e 'using Pkg; Pkg.test("CrossScaleRC")'
-```
-
-**Tests with coverage** (runs tests, prints a coverage summary to the terminal, then deletes `.cov` files):
-
-```bash
-./scripts/run_tests_coverage.sh
-```
-
-Or manually:
-
-```bash
-julia --project=. -e 'using Pkg; Pkg.test("CrossScaleRC"; coverage=true)'
-```
-
-The coverage block at the end of `test/runtests.jl` reports covered/total lines for `src/` and cleans up all `.cov` files under `src/` and `test/`.
