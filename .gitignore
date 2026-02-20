@@ -1,4 +1,5 @@
 data/kuramoto/*
 data/sst/*
+!data/**/.gitkeep
 
 .DS_Store
