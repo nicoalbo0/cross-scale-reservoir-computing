@@ -80,3 +80,5 @@ These are the main entry points for running experiments.
 | **main_sst.jl** | Two-layer RC on **sea surface temperature** data. Loads multi-resolution SST via `load_data([18.0, 6.0]; ...)`, builds 2D blocks with `make_blocks(data, grids, mixing)`, flattens to matrices, and runs `run_multi_layer` (coarse + fine) with 2D block structure. |
 
 All main scripts set up data, hyperparameters, and (where applicable) blocks, then call the appropriate high-level API (`run_single_layer`, `run_multi_layer`, `DeepESN_*`, `nextgen_closedloop`). Tuning and grid-search are handled by the `run_tuning_*.jl` scripts.
+
+[![DOI](https://zenodo.org/badge/1126847329.svg)](https://doi.org/10.5281/zenodo.18790804)
