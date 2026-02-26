@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+title: "CrossScaleRC"
+message: "If you use this software, please cite it as follows."
+type: software
+
+authors:
+  - family-names: Alboré
+    given-names: Nicola
+  - family-names: Di Antonio
+    given-names: Gabriele
+
+version: "v1.0.0"
+doi: 10.5281/zenodo.18790804
+date-released: 2026-02-26
+
+url: https://github.com/nicoalbo0/cross-scale-reservoir-computing
+
+license: MIT
