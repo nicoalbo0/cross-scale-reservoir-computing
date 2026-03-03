@@ -1,6 +1,7 @@
 if length(ARGS) != 2
     error("Use the following command:\n- julia ...jl g name")
 end
+
 # Activate environment
 using Pkg, Revise
 Pkg.activate(".")
