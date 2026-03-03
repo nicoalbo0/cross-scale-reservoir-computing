@@ -9,14 +9,6 @@ using Plots
 
 BLAS.set_num_threads(1)
 
-# single network config        | parallel network config
-# Q            = 64            | Q            = 512
-# L            = 22            | L            = 200
-# μ            = 0.0/0.01      | μ            = 0.0/0.01
-# num_networks = 1             | num_networks = 64
-# mixing       = 0             | mixing       = 6/12
-# Λ_max        = 0.05          | Λ_max       = 0.09
-
 Q = 128
 L = 44
 μ = 0.01
@@ -37,17 +29,18 @@ warmup       = 1_000
 M, Ttot = size(data)
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
-num_networks = [4,       8]
-mixing       = [2,       2]
-res_size     = [1000, 1000]
-res_radius   = [0.1,   0.6]
+num_networks = [4,       16]
+mixing       = [2,       8]
+res_size     = [1000, 400]
+res_radius   = [0.1,   0.2]
 degree       = [10,     10]
-g_in_rec     = [2.5/√(div(Q,resolution_divisor_upper_layer)/num_networks[1]),   1.0 /√(Q/num_networks[2])]
-g_in_neigh   = [2.5/√(mixing[1]),   2.0/√(mixing[2])]
-g_in_layer   = [0.0,   2.0/√(div(Q,resolution_divisor_upper_layer)/num_networks[2])]
-ridge_param  = [1e-5, 1e0]
+g_in_rec     = [1.0/√(div(Q,resolution_divisor_upper_layer)/num_networks[1]),   10.0^(-3.0) /√(Q/num_networks[2])]
+g_in_neigh   = [10^(-0.5)/√(mixing[1]),   10.0^(-2.5)/√(mixing[2])]
+g_in_layer   = [0.0,   1.0/√(div(Q,resolution_divisor_upper_layer)/num_networks[2])]
+ridge_param  = [1e-6, 1e-3]
 dt           = [0.25, 0.25]
 τ            = [0.25, 0.25]
+
 
 res_params = (res_size, res_radius, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt)
 
@@ -68,7 +61,7 @@ preds_fine, preds_coarse, train_pred_fine, train_pred_coarse, train_data_coarse,
     ridge_parameter = ridge_param,
     show_progress = false,
     input_mode = :structured, # :random, :structured,
-    regression_mode = [:linear, :quadratic]
+    regression_mode = [:quadratic, :quadratic]
 )
 
 ## Plotting
@@ -80,7 +73,7 @@ p_coarse =
         data_coarse,
         preds_coarse;
         τ = tau,
-        λ_max = 0.05,
+        λ_max = 0.08,
         warmup = warmup,
         train_len = train_len,
         Q = Int(round(Q / resolution_divisor_upper_layer)),
@@ -99,7 +92,7 @@ p_fine =
         data,
         preds_fine;
         τ = tau,
-        λ_max = 0.05,
+        λ_max = 0.08,
         warmup = warmup,
         train_len = train_len,
         Q = Q,

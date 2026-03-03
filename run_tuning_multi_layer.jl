@@ -1,3 +1,6 @@
+if length(ARGS) != 3
+    error("Use the following command:\n- julia ...jl g ridge name")
+end
 # Activate environment
 using Pkg, Revise
 Pkg.activate(".")
@@ -31,8 +34,8 @@ warmup      = 1_000
 M, Ttot = size(data)
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
-num_networks = [4, 8]
-mixing = [2, 2]
+num_networks = [4, 16]
+mixing = [4, 8]
 
 blocks_coarse = make_blocks(size(coarse, 1), num_networks[1], mixing[1])
 blocks_fine   = make_blocks(size(fine, 1), resolution_divisor_upper_layer, num_networks[2], mixing[2], num_networks[1]; overlap_mode = :exclude)
@@ -73,15 +76,13 @@ function run_once(params)
     return error_grid
 end
 
-
-# Baseline vector params (length-2) + grids for only the [2] entries
 base = (
-    res_size   = [1000, 1000],
+    res_size   = [1000, 400],
     res_radius = [0.1,  0.6],
     degree     = [10,   10],
-    g_in_rec   = [2.5 / sqrt(div(Q, resolution_divisor_upper_layer) / num_networks[1]),
+    g_in_rec   = [1.0 / sqrt(div(Q, resolution_divisor_upper_layer) / num_networks[1]),
                  1.0 / sqrt(Q / num_networks[2])],
-    g_in_neigh = [2.5 / sqrt(mixing[1]),
+    g_in_neigh = [10^(-0.5) / sqrt(mixing[1]),
                  2.0 / sqrt(mixing[2])],
     g_in_layer = [0.0,
                  2.0 / sqrt(div(Q, resolution_divisor_upper_layer) / num_networks[2])],
@@ -106,20 +107,22 @@ end
 run_once_grid(p) = run_once(build_params(base, p))
 
 grids = Dict(
-    :res_size2   => [1000],
-    :res_radius2 => [0.1],
-    :g_in_rec2   => [1.0 / sqrt(Q / num_networks[2]), 0.0],
-    :g_in_neigh2 => [2.0 / sqrt(mixing[2]), 0.0],
-    :g_in_layer2 => [2.0 / sqrt(div(Q, resolution_divisor_upper_layer) / num_networks[2])],
-    :ridge2      => [1e-4, 1e1],
+    :res_size2   => [400],
+    :res_radius2 => [parse(Float64, ARGS[1])],
+    :g_in_rec2   => [10.0^k / sqrt(Q / num_networks[2]) for k=-3:0.5:1],
+    :g_in_neigh2 => [10.0^k / sqrt(mixing[2]) for k=-3:0.5:0.5],
+    :g_in_layer2 => [10.0^k / sqrt(div(Q, resolution_divisor_upper_layer) / num_networks[2]) for k=-3:0.5:0.5],
+    :ridge2      => [parse(Float64, ARGS[2])],
 )
 
+time0 = time()
 grid_search(
     run_once_grid,
     grids;
-    nrep = 3,
-    outfile = "gridsearch_multilayer_Q$(Q).csv",
+    nrep = 20,
+    outfile = "gridsearch_multilayer_Q$(Q)_$(ARGS[3]).csv",
     param_order = [:res_size2, :res_radius2, :g_in_rec2, :g_in_neigh2, :g_in_layer2, :ridge2],
     error_names = [:rmse1, :rmse2, :rmse3, :rmse4],
     progress = true,
 )
+println("time spent $(time() - time0)")

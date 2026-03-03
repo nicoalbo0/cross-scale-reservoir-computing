@@ -54,9 +54,9 @@ function build_W_in(
 
     elseif mode == :random
 
-        W_rec   = g_in_rec .* (2 .* rand(N, rec_dimensions) .- 1)
-        W_neigh = g_in_neigh .* (2 .* rand(N, neigh_dimensions) .- 1)
-        W_layer = g_in_layer .* (2 .* rand(N, layer_dimensions) .- 1)
+        W_rec   = g_rec .* (2 .* rand(N, rec_dim) .- 1)
+        W_neigh = g_neigh .* (2 .* rand(N, neigh_dim) .- 1)
+        W_layer = g_layer .* (2 .* rand(N, layer_dim) .- 1)
     end
 
 
@@ -178,8 +178,7 @@ function train_parallel_reservoir(
             mul!(Win_layer_u,  reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(x)
-                #x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k]) discrete
-                x[k] = (1 - reservoir.dt_τ) .* x[k] + reservoir.dt_τ .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k]) # adding leaking rate
+                x[k] = (1 - reservoir.dt_τ) .* x[k] + reservoir.dt_τ .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
 
             end
 

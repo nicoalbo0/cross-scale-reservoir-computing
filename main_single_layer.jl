@@ -9,20 +9,11 @@ using Plots, Measures, LaTeXStrings
 
 BLAS.set_num_threads(1)
 
-# single network config        | parallel network config
-# dt           = 0.25          | dt           = 0.25
-# Q            = 64            | Q            = 512
-# L            = 22            | L            = 200
-# μ            = 0.0/0.01      | μ            = 0.0/0.01
-# num_networks = 1             | num_networks = 64
-# mixing       = 0             | mixing       = 6/12
-# Λ_max        = 0.05          | Λ_max       = 0.09
-
 Q0 = 128
 L = 44
-μ = 0.0
+μ = 0.01
 
-resolution_divisor = 4; #4
+resolution_divisor = 1;
 Q = div(Q0,resolution_divisor);
 data, τ = load_data(Q0, L, μ; show_data=false, refinement=1);
 
@@ -31,8 +22,8 @@ data = regrid_average(data, resolution_divisor);
 
 # Experiment configuration
 
-num_networks = 4
-mixing       = 2
+num_networks = 16
+mixing       = 8
 blocks       = make_blocks(size(data, 1), num_networks, mixing)
 washout      = 1_000
 train_len    = 50_000
@@ -42,13 +33,13 @@ warmup       = 1_000
 M, Ttot = size(data)
 train_len + predict_len ≤ Ttot || error("Not enough data")
 
-res_size     = 500
-res_radius   = 0.1
+res_size     = 400
+res_radius   = 0.3
 degree       = 10
-g_in_rec     = 2.5/√(Q/num_networks)
-g_in_neigh   = 2.5/√(mixing)
+g_in_rec     = 1.0/√(Q/num_networks)
+g_in_neigh   = 1.0/√(mixing)
 g_in_layer   = 0.0
-ridge_param  = 1e-5
+ridge_param  = 1e-3
 dt           = 0.25
 τ            = 0.25
 
@@ -69,36 +60,7 @@ preds_test, preds_train, train_data , X, _ = run_single_layer(
     regression_mode = :quadratic, #or linear
 )
 
-## Plotting 
-#=
-p1 = plot_train_test_heatmaps(
-    train_data,
-    preds_train,
-    data,
-    preds_test;
-    τ = τ,
-    λ_max = 0.05,
-    warmup = warmup,
-    train_len = train_len,
-    Q = Q,
-    L = L
-);
-
-test_data   = data[:,train_len - warmup + 1 : train_len - warmup + size(preds_test,2)];
-
-error_curve = collect(rmse_upto(test_data[:, warmup:end], preds_test[:, warmup:end]; T=t) for t in 1:size(test_data[:, warmup:end], 2));
-
-p2_1 = plot(error_curve, grid=false, lw=2, color=:black, ylabel="rmse_upto", xlabel="timestep", legend=false, title="Total err.");
-vline!(p2_1,[warmup, warmup], lw=2, color=:red);
-
-p2_2 = plot_units_activity(X);
-plot!(p2_2, title="Network activity");
-
-p2 = plot(p2_1, p2_2, layout=(2,1));
-display(plot(p1,p2, layout=grid(1, 2, widths = (2/3, 1/3)), size=(750,500)))
-=#
-
-## Plotting Check 2
+## Plot
 test_data   = data[:,train_len - warmup + 1 : train_len - warmup + size(preds_test,2)];
 h1 = heatmap(test_data[:, warmup:end], clim=(-3,3), cmap=:RdBu, xlabel="timestep", title="Test Data");
 h2 = heatmap(preds_test[:, warmup:end], clim=(-3,3), cmap=:RdBu, xlabel="timestep", title="Test Forecast");

@@ -1,3 +1,6 @@
+if length(ARGS) != 2
+    error("Use the following command:\n- julia ...jl g name")
+end
 # Activate environment
 using Pkg, Revise
 Pkg.activate(".")
@@ -15,13 +18,13 @@ Q0 = 128
 L = 44
 μ = 0.01
 
-resolution_divisor = 4
+resolution_divisor = 1
 Q = div(Q0, resolution_divisor)
 data, τ = load_data(Q0, L, μ; show_data=false, refinement=1)
 data = regrid_average(data, resolution_divisor)
 
-num_networks = 4
-mixing       = 2
+num_networks = 16
+mixing       = 8
 blocks       = make_blocks(size(data, 1), num_networks, mixing)
 washout      = 1_000
 train_len    = 50_000
@@ -79,24 +82,24 @@ end
 
 # Scalar grid definition
 grids = Dict(
-    :res_size    => [300],
-    :res_radius  => [0.1, 0.5],
+    :res_size    => [400],
+    :res_radius  => [parse(Float64, ARGS[1])],
     :degree      => [10],
-    :g_in_rec    => [2.0 / sqrt(Q / num_networks),
-                     3.0 / sqrt(Q / num_networks)],
-    :g_in_neigh  => [2.0 / sqrt(mixing),
-                    3.0 / sqrt(mixing)],
+    :g_in_rec    => [10.0^k / sqrt(Q / num_networks) for k=-3:0.5:1],
+    :g_in_neigh  => [10.0^k / sqrt(mixing) for k=-3:0.5:0.5],
     :g_in_layer  => [0.0],
-    :ridge_param => [1e-6, 1e-5, 1e-4],
+    :ridge_param => [10.0^k for k=-6:-2],
 )
 
 # Run
+time0 = time()
 grid_search(
     run_once_grid,
     grids;
-    nrep = 3,
-    outfile = "gridsearch_singlelayer_Q$(Q).csv",
+    nrep = 20,
+    outfile = "gridsearch_singlelayer_Q$(Q)_$(ARGS[2]).csv",
     param_order = [:res_size, :res_radius, :degree, :g_in_rec, :g_in_neigh, :g_in_layer, :ridge_param],
     error_names = [:rmse1, :rmse2, :rmse3, :rmse4],
     progress = true,
 )
+println("time spent $(time() - time0)")

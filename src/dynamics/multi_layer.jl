@@ -67,7 +67,7 @@ function run_multi_layer(
             warmup  = warmup,
             ridge_parameter = ridge_parameter[2],
             show_progress = show_progress,
-            input_mode = :structured,
+            input_mode = input_mode,
             regression_mode = regression_mode[2]
         )
 

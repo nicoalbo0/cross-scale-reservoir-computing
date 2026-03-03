@@ -8,13 +8,13 @@ using CrossScaleRC
 using LinearAlgebra
 using Plots
 
-BLAS.set_num_threads(1)
+BLAS.set_num_threads(Threads.nthreads())
 
 # Data
 Q = 128
 L = 44
 μ = 0.01
-resolution_divisor = 4
+resolution_divisor = 1
 Qeffective = div(Q, resolution_divisor)
 
 data, τ = load_data(Q, L, μ; show_data=false, refinement=1)
@@ -30,23 +30,36 @@ washout + train_len + predict_len + 2 ≤ Ttot || error("Not enough data")
 
 
 # Run NextGen
-past   = 3      # number of past values (k)
-degree = 2      # polynomial degree (p)
-ridge  = 1e-2
+# Reduce the total number of variables by PCA
+using MultivariateStats
+pca_model = fit(PCA, data; pratio=0.999, method=:auto);
+Ψ = eigvecs(pca_model);
 
-preds_test, preds_train, Wout, Φ = nextgen_closedloop(
-    data,
+#EVs = eigvals(M) / var(M);
+#pEVs = cumsum(EVs,dims=1);
+#display(plot(size=(350,320), pEVs, marker=:circle, legend=false, xscale=:log10,ylabel="cumulative exp. var.", xlabel="#components", ylims=(0,1.05),tick_direction=:out, linecolor=:black, color=mcolor, lw=1.0))
+
+data_red = ψ' * data;
+#-------
+
+past   = 4      # number of past values (k)
+degree = 2      # polynomial degree (p)
+ridge  = 0.0002
+nfeat = 0 # 0 means all
+
+preds_test_red, preds_train_red, Wout = nextgen_closedloop(
+    data_red,
     train_len,
     predict_len;
     washout = washout,
     past = past,
     degree = degree,
-    ridge = ridge
+    ridge = ridge,
+    nfeat = nfeat
 )
+preds_test = ψ * preds_test_red
 
-# Optional quick plot for one component (e.g. component 1)
 t_start = washout + past
-train_data = data[:, (t_start + 1):(t_start + train_len)];
 test_data  = data[:, (t_start + train_len + 1):(t_start + train_len + predict_len)];
 
 ## Plotting
