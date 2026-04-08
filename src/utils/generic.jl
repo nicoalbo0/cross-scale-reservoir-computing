@@ -111,6 +111,87 @@ function square_even_rows(XX::Matrix{T}) where T<:Real
 end
 
 """
+    nino34_index(sst_3d, lons, lats) -> Vector{Float64}
+
+Compute the Niño 3.4 index: spatial mean SST (anomaly) over 5°S–5°N, 170°W–120°W
+(190°–240° in [0,360) convention) for each time step.
+
+- `sst_3d`: (nlon × nlat × nt) array of SST or SST anomalies.
+- `lons`: vector of length nlon with cell-centre longitudes in [-180, 180) or [0, 360).
+- `lats`: vector of length nlat with cell-centre latitudes in [-90, 90].
+
+Returns a vector of length nt.
+"""
+function nino34_index(sst_3d::Array{<:Real, 3}, lons::AbstractVector, lats::AbstractVector)
+    # Niño 3.4 box: 170°W–120°W, 5°S–5°N
+    # In [0,360): 190°–240°; in [-180,180): -170°–-120°
+    lons360 = mod.(lons, 360.0)
+    lon_mask = 190.0 .<= lons360 .<= 240.0
+    lat_mask = -5.0  .<= lats   .<= 5.0
+
+    any(lon_mask) || error("No longitude grid cells fall in the Niño 3.4 box (170W–120W). Check lons.")
+    any(lat_mask) || error("No latitude grid cells fall in the Niño 3.4 box (5S–5N). Check lats.")
+
+    region = sst_3d[lon_mask, lat_mask, :]           # (n_lo × n_la × nt)
+    n_lo, n_la, nt = size(region)
+    index = Vector{Float64}(undef, nt)
+    for t in 1:nt
+        slice = @view region[:, :, t]
+        valid = filter(!isnan, vec(slice))
+        index[t] = isempty(valid) ? NaN : mean(valid)
+    end
+    return index
+end
+
+"""
+    sst_grid_coords(nlon, nlat, res) -> (lons, lats)
+
+Return the cell-centre longitude and latitude vectors for a global SST grid at
+resolution `res`°, consistent with the Copernicus 0.25° native grid (first centre at
+-179.875° lon, -89.875° lat).
+"""
+function sst_grid_coords(nlon::Int, nlat::Int, res::Real)
+    lon_start = -180.0 + res / 2
+    lat_start = -90.0  + res / 2
+    lons = lon_start .+ res .* (0:nlon-1)
+    lats = lat_start .+ res .* (0:nlat-1)
+    return lons, lats
+end
+
+"""
+    skill_score(index_true, index_pred) -> NamedTuple
+
+Compute ENSO forecast skill scores for the Niño 3.4 index (or any scalar time series).
+
+Returns a NamedTuple with:
+- `acc`: Anomaly Correlation Coefficient (Pearson r between true and predicted).
+- `rmse`: Root mean square error.
+- `rmse_skill`: RMSE skill score relative to a persistence baseline (lag-1):
+  `1 - RMSE_pred / RMSE_persistence`. Positive = better than persistence.
+"""
+function skill_score(index_true::AbstractVector, index_pred::AbstractVector)
+    @assert length(index_true) == length(index_pred) "index_true and index_pred must have the same length"
+    n = length(index_true)
+    n >= 2 || error("Need at least 2 time steps for skill_score")
+
+    μ_t = mean(index_true)
+    μ_p = mean(index_pred)
+    σ_t = std(index_true)
+    σ_p = std(index_pred)
+
+    acc  = (σ_t > 0 && σ_p > 0) ?
+           mean((index_true .- μ_t) .* (index_pred .- μ_p)) / (σ_t * σ_p) : NaN
+
+    rmse_val = sqrt(mean((index_true .- index_pred).^2))
+
+    # Persistence baseline: predict index_true[t] = index_true[t-1]
+    rmse_pers = sqrt(mean((index_true[2:end] .- index_true[1:end-1]).^2))
+    rmse_skill = 1.0 - rmse_val / rmse_pers
+
+    return (acc=acc, rmse=rmse_val, rmse_skill=rmse_skill)
+end
+
+"""
     rmse_upto(data, pred; T=size(data, 2), coords=axes(data, 1))
 
 Compute RMSE over the first `T` time steps and over rows indexed by `coords`.
