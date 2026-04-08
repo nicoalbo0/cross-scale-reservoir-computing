@@ -47,6 +47,9 @@ export rmse_upto
 export build_W_in
 export input_dimensions
 export grid_search
+export nino34_index
+export skill_score
+export sst_grid_coords
 
 include("types.jl")
 include("data/loading.jl")
