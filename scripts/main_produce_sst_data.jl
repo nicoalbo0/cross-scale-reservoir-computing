@@ -1,6 +1,6 @@
 # Activate environment
 using Pkg, Revise
-Pkg.activate("/../.")
+Pkg.activate(joinpath(@__DIR__, ".."))
 Pkg.instantiate()
 
 using CrossScaleRC, JLD2
