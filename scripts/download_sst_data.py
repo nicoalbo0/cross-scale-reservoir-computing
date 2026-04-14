@@ -1,4 +1,5 @@
 import cdsapi
+import glob
 import os
 import zipfile
 import time
@@ -28,10 +29,17 @@ for year_np in np.arange(1982,2016):
             # to avoid excessive traffic    
             time.sleep(1)
 
+            day_dir = f'{dir}/data/sst/{year}/{month}/{day}'
+
             try:
-                os.makedirs(f'{dir}/data/sst/{year}/{month}/{day}', exist_ok=True)
+                os.makedirs(day_dir, exist_ok=True)
             except OSError as e:
-                sys.exit(f'Cant create: {dir}/data/sst/{year}/{month}/{day}')
+                sys.exit(f'Cant create: {day_dir}')
+
+            # skip if this day was already downloaded (any .nc file present)
+            if glob.glob(f'{day_dir}/*.nc'):
+                print(f'skip {year}-{month}-{day} (already downloaded)')
+                continue
 
             # download file
             c.retrieve(
