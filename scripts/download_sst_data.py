@@ -50,4 +50,4 @@ for year_np in np.arange(1982,2016):
                 zip_ref.extractall(f'{dir}/data/sst/{year}/{month}/{day}')
 
             # delete the zip file
-            os.remove(f'{dir}/../data/sst/{year}/{month}/{day}/download.zip')
+            os.remove(f'{dir}/data/sst/{year}/{month}/{day}/download.zip')
