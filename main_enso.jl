@@ -23,20 +23,34 @@ Pkg.instantiate()
 
 using CrossScaleRC
 using LinearAlgebra
+using Random
 using Statistics
 using Plots, Measures, LaTeXStrings
 
 BLAS.set_num_threads(1)   # prevent BLAS/Julia-thread contention
 
+# Fix the RNG seed so runs are reproducible and mode comparisons are apples-to-apples
+# (the reservoir's sparse recurrent matrix and input weights are randomly drawn).
+Random.seed!(42)
+
 # ---------------------------------------------------------------------------
 # 1. Experiment configuration
 # ---------------------------------------------------------------------------
+
+# Architecture mode:
+#   :three_layer  — 18° → 6° → 2° (Call A's 6° output feeds Call B's 6° coarse)
+#   :two_layer    — 6° (ground-truth) → 2°                       (Call A skipped)
+#   :single_layer — 2° alone, no cross-scale                     (Call A & B skipped)
+# Output filenames are suffixed with the mode for side-by-side comparison.
+mode = :three_layer
+@assert mode in (:three_layer, :two_layer, :single_layer)
+mode_tag = String(mode)
 
 sampling_rate = 4          # upsample daily SST 4× → dt = 0.25 day/step
                            # 4 steps ≈ 1 day, 120 steps ≈ 1 month
 
 washout     = 1_000        # transient steps discarded before ridge regression
-train_len   = 30_000       # training window: 30 000 × 0.25 day = 7 500 days ≈ 20.5 yr
+train_len   = 45_000       # training window: 45 000 × 0.25 day = 11 250 days ≈ 30.8 yr
 predict_len = 3_000        # closed-loop prediction: 3 000 × 0.25 day = 750 days ≈ 2 yr
 warmup      = 1_000        # state warm-up from true data before closed-loop begins
 
@@ -136,7 +150,9 @@ g_rec_A    = [10^(-1.5)/√rec_vc,   10^(-0.5)/√rec_m]
 g_neigh_A  = [10^(-1.5)/√neigh_vc, 10^(-0.5)/√neigh_m]
 g_layer_A  = [0.0,                  10^(-1.0)/√layer_m]
 ridge_A    = [1e-2,  1e-1]
-τ_A        = [2.5,   2.5]
+# Slow-leak: τ ≫ 2.5 extends reservoir memory timescale. ENSO has 2–7 yr
+# autocorrelation; coarse (18°) needs the longest memory, medium (6°) less so.
+τ_A        = [50.0,  20.0]
 dt_A       = [dt,    dt]
 params_A   = (res_size_A, res_rad_A, degree_A, g_rec_A, g_neigh_A, g_layer_A, τ_A, dt_A)
 
@@ -148,7 +164,7 @@ g_rec_B    = [10^(-0.5)/√rec_m,   10^(-0.5)/√rec_f]
 g_neigh_B  = [10^(-0.5)/√neigh_m, 10^(-0.5)/√neigh_f]
 g_layer_B  = [0.0,                 10^(-1.0)/√layer_f]
 ridge_B    = [1e-1,  10^(1.0)]
-τ_B        = [2.5,   2.5]
+τ_B        = [20.0,  5.0]
 dt_B       = [dt,    dt]
 params_B   = (res_size_B, res_rad_B, degree_B, g_rec_B, g_neigh_B, g_layer_B, τ_B, dt_B)
 
@@ -156,39 +172,69 @@ params_B   = (res_size_B, res_rad_B, degree_B, g_rec_B, g_neigh_B, g_layer_B, τ
 # 5. Run 3-layer pipeline (chained)
 # ---------------------------------------------------------------------------
 
-println("\n--- Call A: coarse (18°) → medium (6°) ---")
-preds_m, preds_vc,
-    train_pred_m, train_pred_vc,
-    train_data_vc, train_data_m,
-    _, X_vc, X_m = run_multi_layer(
-        params_A,
-        m_mat, vc_mat,
-        train_len, predict_len,
-        [blocks_vc, blocks_m_AB];
-        washout         = washout,
-        warmup          = warmup,
-        ridge_parameter = ridge_A,
-        show_progress   = true,
-        input_mode      = :random,
-        regression_mode = [:linear, :linear]
-    )
+if mode == :three_layer
+    println("\n--- Call A: coarse (18°) → medium (6°) ---")
+    preds_m, preds_vc,
+        train_pred_m, train_pred_vc,
+        train_data_vc, train_data_m,
+        _, X_vc, X_m = run_multi_layer(
+            params_A,
+            m_mat, vc_mat,
+            train_len, predict_len,
+            [blocks_vc, blocks_m_AB];
+            washout         = washout,
+            warmup          = warmup,
+            ridge_parameter = ridge_A,
+            show_progress   = true,
+            input_mode      = :random,
+            regression_mode = [:quadratic, :quadratic]
+        )
+    # Call A's full 6° trajectory: training predictions + autonomous forecast.
+    # Feeding this as Call B's coarse closes the 18° → 6° → 2° chain.
+    coarse_for_B = hcat(train_pred_m, preds_m[:, warmup+1:end])
+end
 
-println("\n--- Call B: medium (6°) → fine (2°) ---")
-preds_f, _,
-    train_pred_f, _,
-    _, train_data_f,
-    _, _, X_f = run_multi_layer(
-        params_B,
-        f_mat, m_mat,
+if mode in (:three_layer, :two_layer)
+    if mode == :two_layer
+        coarse_for_B = m_mat   # ground-truth 6°, 2-layer baseline
+    end
+    println("\n--- Call B: medium (6°) → fine (2°) ---")
+    preds_f, preds_m_B,
+        train_pred_f, train_pred_m_B,
+        _, train_data_f,
+        _, _, X_f = run_multi_layer(
+            params_B,
+            f_mat, coarse_for_B,
+            train_len, predict_len,
+            [blocks_m_BC, blocks_f];
+            washout         = washout,
+            warmup          = warmup,
+            ridge_parameter = ridge_B,
+            show_progress   = true,
+            input_mode      = :random,
+            regression_mode = [:quadratic, :quadratic]
+        )
+elseif mode == :single_layer
+    println("\n--- Single-layer: 2° fine only, no cross-scale ---")
+    # Build a standalone 2° block structure (rows_layer = [])
+    blocks_f_solo = make_blocks([fine], [(9, 4)], mixing)[1]
+    params_f_solo = (res_size_B[2], res_rad_B[2], degree_B[2],
+                     g_rec_B[2], g_neigh_B[2], 0.0,
+                     τ_B[2], dt_B[2])
+    preds_f, train_pred_f, train_data_f, X_f, _ = run_single_layer(
+        params_f_solo,
+        f_mat,
+        zeros(eltype(f_mat), size(f_mat)),
         train_len, predict_len,
-        [blocks_m_BC, blocks_f];
+        blocks_f_solo;
         washout         = washout,
         warmup          = warmup,
-        ridge_parameter = ridge_B,
+        ridge_parameter = ridge_B[2],
         show_progress   = true,
         input_mode      = :random,
-        regression_mode = [:linear, :linear]
+        regression_mode = :quadratic
     )
+end
 
 # ---------------------------------------------------------------------------
 # 6. Align test windows
@@ -197,9 +243,14 @@ preds_f, _,
 
 t0 = train_len - warmup   # first time index of the test window (1-indexed into *_mat)
 
-test_f  = f_mat[:,  t0 + 1 : t0 + size(preds_f,  2)]
-test_m  = m_mat[:,  t0 + 1 : t0 + size(preds_m,  2)]
-test_vc = vc_mat[:, t0 + 1 : t0 + size(preds_vc, 2)]
+test_f = f_mat[:, t0 + 1 : t0 + size(preds_f, 2)]
+if mode == :three_layer
+    test_m  = m_mat[:,  t0 + 1 : t0 + size(preds_m,  2)]
+    test_vc = vc_mat[:, t0 + 1 : t0 + size(preds_vc, 2)]
+elseif mode == :two_layer
+    # For plotting the 6° layer, use Call B's own 6° coarse predictions.
+    test_m = m_mat[:, t0 + 1 : t0 + size(preds_m_B, 2)]
+end
 
 # ---------------------------------------------------------------------------
 # 7. Niño 3.4 evaluation — single-window summary
@@ -237,12 +288,18 @@ println("  RMSE skill vs pers. : $(round(sc.rmse_skill; digits=3))")
 
 # Spatial RMSE error curves (post-warmup)
 _pw = warmup + 1   # post-warmup start index
-error_curve_f  = [rmse_upto(test_f[:,  _pw:end], preds_f[:,  _pw:end]; T=t)
-                  for t in 1 : size(preds_f[:,  _pw:end], 2)]
-error_curve_m  = [rmse_upto(test_m[:,  _pw:end], preds_m[:,  _pw:end]; T=t)
-                  for t in 1 : size(preds_m[:,  _pw:end], 2)]
-error_curve_vc = [rmse_upto(test_vc[:, _pw:end], preds_vc[:, _pw:end]; T=t)
-                  for t in 1 : size(preds_vc[:, _pw:end], 2)]
+error_curve_f = [rmse_upto(test_f[:, _pw:end], preds_f[:, _pw:end]; T=t)
+                 for t in 1 : size(preds_f[:, _pw:end], 2)]
+
+if mode == :three_layer
+    error_curve_m  = [rmse_upto(test_m[:,  _pw:end], preds_m[:,  _pw:end]; T=t)
+                      for t in 1 : size(preds_m[:,  _pw:end], 2)]
+    error_curve_vc = [rmse_upto(test_vc[:, _pw:end], preds_vc[:, _pw:end]; T=t)
+                      for t in 1 : size(preds_vc[:, _pw:end], 2)]
+elseif mode == :two_layer
+    error_curve_m = [rmse_upto(test_m[:, _pw:end], preds_m_B[:, _pw:end]; T=t)
+                     for t in 1 : size(preds_m_B[:, _pw:end], 2)]
+end
 
 # ---------------------------------------------------------------------------
 # 8. Multi-window skill evaluation
@@ -329,24 +386,37 @@ function layer_heatmaps(test_mat, pred_mat, scale, title_str)
     return plot(h1, h2, h3, size=(900, 300), plot_title=title_str, left_margin=2mm)
 end
 
-sc_vc = 0.5 * maximum(abs.(very_coarse))
-sc_m  = 0.5 * maximum(abs.(medium))
-sc_f  = 0.5 * maximum(abs.(fine))
+sc_f = 0.5 * maximum(abs.(fine))
 
-p_vc = layer_heatmaps(test_vc, preds_vc, sc_vc, "Layer 1 — 18° coarse")
-p_m  = layer_heatmaps(test_m,  preds_m,  sc_m,  "Layer 2 — 6° medium")
-p_f  = layer_heatmaps(test_f,  preds_f,  sc_f,  "Layer 3 — 2° fine")
-
-p_layers = plot(p_vc, p_m, p_f, layout=(3, 1), size=(1_000, 900), left_margin=5mm)
-savefig(p_layers, "results/enso_layer_heatmaps.png")
-println("Saved: results/enso_layer_heatmaps.png")
+if mode == :three_layer
+    sc_vc = 0.5 * maximum(abs.(very_coarse))
+    sc_m  = 0.5 * maximum(abs.(medium))
+    p_vc = layer_heatmaps(test_vc, preds_vc, sc_vc, "Layer 1 — 18° coarse")
+    p_m  = layer_heatmaps(test_m,  preds_m,  sc_m,  "Layer 2 — 6° medium")
+    p_f  = layer_heatmaps(test_f,  preds_f,  sc_f,  "Layer 3 — 2° fine")
+    p_layers = plot(p_vc, p_m, p_f, layout=(3, 1), size=(1_000, 900), left_margin=5mm)
+elseif mode == :two_layer
+    sc_m = 0.5 * maximum(abs.(medium))
+    p_m  = layer_heatmaps(test_m, preds_m_B, sc_m, "Layer 1 — 6° medium")
+    p_f  = layer_heatmaps(test_f, preds_f,   sc_f, "Layer 2 — 2° fine")
+    p_layers = plot(p_m, p_f, layout=(2, 1), size=(1_000, 600), left_margin=5mm)
+else   # :single_layer
+    p_f = layer_heatmaps(test_f, preds_f, sc_f, "2° fine (single layer, no cross-scale)")
+    p_layers = plot(p_f, layout=(1, 1), size=(1_000, 300), left_margin=5mm)
+end
+savefig(p_layers, "results/enso_layer_heatmaps_$(mode_tag).png")
+println("Saved: results/enso_layer_heatmaps_$(mode_tag).png")
 
 # ── RMSE error curves ───────────────────────────────────────────────────────
-p_rmse = plot(error_curve_vc, label="18° coarse", lw=2, color=:blue,
+p_rmse = plot(error_curve_f, label="2° fine", lw=2, color=:red,
               xlabel="step (post-warmup)", ylabel="Cumulative RMSE",
-              title="ENSO forecast error", grid=true, legend=:topleft)
-plot!(p_rmse, error_curve_m,  label="6° medium",  lw=2, color=:orange)
-plot!(p_rmse, error_curve_f,  label="2° fine",    lw=2, color=:red)
+              title="ENSO forecast error ($(mode_tag))", grid=true, legend=:topleft)
+if mode in (:three_layer, :two_layer)
+    plot!(p_rmse, error_curve_m, label="6° medium", lw=2, color=:orange)
+end
+if mode == :three_layer
+    plot!(p_rmse, error_curve_vc, label="18° coarse", lw=2, color=:blue)
+end
 
 # ── Niño 3.4 time series ────────────────────────────────────────────────────
 p_n34 = plot(n34_true, label="Observed", lw=2, color=:black,
@@ -374,9 +444,10 @@ hline!(p_lead, [0.5], lw=1.5, linestyle=:dash, color=:gray,  label="ACC = 0.5 (u
 hline!(p_lead, [0.0], lw=1.0, linestyle=:dot,  color=:black, label="no skill")
 
 p_skill = plot(p_rmse, p_n34, p_windows, p_lead,
-               layout=(2, 2), size=(1_200, 800), left_margin=3mm, bottom_margin=3mm)
-savefig(p_skill, "results/enso_skill_summary.png")
-println("Saved: results/enso_skill_summary.png")
+               layout=(2, 2), size=(1_200, 800), left_margin=3mm, bottom_margin=3mm,
+               plot_title="mode = $(mode_tag)")
+savefig(p_skill, "results/enso_skill_summary_$(mode_tag).png")
+println("Saved: results/enso_skill_summary_$(mode_tag).png")
 
 try display(p_layers); catch end
 try display(p_skill);  catch end
@@ -386,7 +457,7 @@ try display(p_skill);  catch end
 # ---------------------------------------------------------------------------
 
 println("\n" * "="^55)
-println("ENSO EXPERIMENT SUMMARY")
+println("ENSO EXPERIMENT SUMMARY  [mode = $(mode_tag)]")
 println("="^55)
 println("Train   : $train_len steps  ($(round(train_len * dt / 365; digits=1)) yr)")
 println("Predict : $predict_len steps  ($(round(predict_len * dt / 365; digits=1)) yr)")
