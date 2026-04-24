@@ -143,7 +143,10 @@ println("   6° medium : rec=$rec_m,  neigh=$neigh_m,  layer=$layer_m")
 println("    2° fine  : rec=$rec_f,  neigh=$neigh_f,  layer=$layer_f")
 
 # ── Call A: coarse (18°) → medium (6°) ──────────────────────────────────────
-res_size_A = [800,   1_000]
+# Bump 18° reservoir size: this is where ENSO's multi-year memory has to live.
+# Bumping 6° to 2000 *degraded* skill (tested) — the existing 6° config was
+# doing real work. 18° has only 3 blocks so N=3000 is memory-cheap.
+res_size_A = [3_000, 1_000]
 res_rad_A  = [0.85,  0.75]
 degree_A   = [10,    10]
 g_rec_A    = [10^(-1.5)/√rec_vc,   10^(-0.5)/√rec_m]
