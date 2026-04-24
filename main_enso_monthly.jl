@@ -265,11 +265,69 @@ p = plot(p1, p2; layout=(2, 1), size=(1200, 700), left_margin=4mm)
 savefig(p, "results/enso_monthly_$(mode_tag)_$(seed_tag).png")
 println("\nSaved: results/enso_monthly_$(mode_tag)_$(seed_tag).png")
 
+# ── Geographic snapshot maps — 2° resolution, observed vs forecast ─────────
+# Show the SST-anomaly field at selected lead times so spatial coverage of
+# ENSO-related patterns (warm pool, cold tongue, central-Pacific warming
+# during El Niño) can be compared between observed and forecast directly.
+snapshot_leads = [6, 12, 18, 24]
+snapshot_leads = filter(L -> L ≤ size(preds_f_3d, 3) - warmup, snapshot_leads)
+# Fixed color scale (±1.5 σ, since data is already normalized to unit std).
+# Using a tight scale reveals patterns rather than washing them out.
+sc_map = 1.5
+
+function map_panel(field2d, lons, lats, title_str, scale; colormap=:RdBu)
+    heatmap(lons, lats, permutedims(field2d);
+            clim=(-scale, scale), c=colormap,
+            xlabel="longitude (°E)", ylabel="latitude (°N)",
+            title=title_str, aspect_ratio=:equal,
+            xlims=(minimum(lons), maximum(lons)),
+            ylims=(minimum(lats), maximum(lats)),
+            colorbar=true)
+end
+
+lons_plot = mod.(lons_f_crop, 360.0)   # 126…288 °E
+# Ensure monotonic for heatmap
+perm = sortperm(lons_plot)
+lons_plot = lons_plot[perm]
+
+map_panels = Plots.Plot[]
+for L in snapshot_leads
+    col = warmup + L
+    obs_2d  = test_f_3d[:,  :, col][perm, :]
+    fore_2d = preds_f_3d[:, :, col][perm, :]
+    err_2d  = obs_2d .- fore_2d
+
+    push!(map_panels, map_panel(obs_2d,  lons_plot, lats_f_crop,
+                                "Observed — lead $L mo", sc_map))
+    push!(map_panels, map_panel(fore_2d, lons_plot, lats_f_crop,
+                                "Forecast — lead $L mo", sc_map))
+    push!(map_panels, map_panel(err_2d,  lons_plot, lats_f_crop,
+                                "Obs − Forecast — lead $L mo", sc_map))
+end
+
+n_leads = length(snapshot_leads)
+p_maps = plot(map_panels...;
+              layout = (n_leads, 3),
+              size = (1600, 320 * n_leads),
+              plot_title = "2° SST anomaly maps  —  seed=$(seed)  mode=$(mode_tag)",
+              left_margin = 4mm, bottom_margin = 2mm)
+savefig(p_maps, "results/enso_monthly_maps_$(mode_tag)_$(seed_tag).png")
+println("Saved: results/enso_monthly_maps_$(mode_tag)_$(seed_tag).png")
+
+# Persist full 2° spatial forecast field so the aggregator can build
+# ensemble-mean maps and pattern-correlation diagnostics across seeds.
+# test_f_3d/preds_f_3d are (nlon × nlat × (warmup + predict_len)); drop the
+# warmup columns so saved arrays line up with scoring axis.
+test_f_post  = test_f_3d[:,  :, warmup + 1 : end]
+preds_f_post = preds_f_3d[:, :, warmup + 1 : end]
+
 jldsave("results/enso_monthly_preds_$(mode_tag)_$(seed_tag).jld2";
         n34_true=n34_true, n34_pred=n34_pred,
         lead_months=collect(lead_months[1:length(lead_accs)]),
         lead_accs=lead_accs,
         full_acc=sc.acc, full_rmse=sc.rmse, full_rmse_skill=sc.rmse_skill,
+        test_f=test_f_post, preds_f=preds_f_post,
+        lons_f=collect(lons_f_crop), lats_f=collect(lats_f_crop),
         seed=seed, mode_tag=mode_tag)
 
 println("\n" * "="^50)
