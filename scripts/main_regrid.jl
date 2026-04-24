@@ -5,42 +5,34 @@ Pkg.instantiate()
 
 using CrossScaleRC
 using ProgressMeter
+using Dates
 
 dir = pwd()
 
-years_vec = ["$(i)" for i in 1982:2016]
-months_vec = ["$(i)" for i in 1:12]
-months_vec[1:9] = ["0$(i)" for i in 1:9]
-days_vec = ["$(i)" for i in 1:31]
-days_vec[1:9] = ["0$(i)" for i in 1:9]
-
-
 scale_factor = 0.01
-add_offset = 273.15
-valid_min = -300
-valid_max = 4500
-range = (valid_min*scale_factor+add_offset, valid_max*scale_factor+add_offset) #(270.15, 318.15)
+add_offset   = 273.15
+valid_min    = -300
+valid_max    = 4500
+range_phys   = (valid_min*scale_factor + add_offset, valid_max*scale_factor + add_offset)   # (270.15, 318.15) K
 
-# fill_value = -32768
-# lon (0.25°) x lat (0.25°) x day
-# lon: -179.875, -179.625, ..., 179.625, 179.875
-# lat: -89.875, -89.625,..., 89.625, 89.875
-# time: 1
-# 1440 x 720 x 1
-# lon x lat x time
+# Native grid 1440 × 720 at 0.25°.
+# step_regrid ∈ {8, 24, 72}  →  resolution ∈ {2.0°, 6.0°, 18.0°}
+# All three are required by main_enso.jl.
+for step_regrid in [8, 24, 72]
 
-for step_regrid in [8; 72] #[1; 2; 4; 6; 12; 18; 24; 36; 48; 60] 
+    res_deg = 0.25 * step_regrid
+    println("\n=== Regridding to $(res_deg)°  (step=$(step_regrid)) ===")
 
-    p = Progress(length(years_vec)*length(months_vec)*length(days_vec), "Regridding $(step_regrid*0.25)°...", 50)
+    # enumerate calendar days 1982-01-01 .. 2015-12-31 honouring month lengths
+    dates = Date(1982, 1, 1) : Day(1) : Date(2015, 12, 31)
+    p = Progress(length(dates), "Regridding $(res_deg)°", 50)
 
-    for year in years_vec
-        for month in months_vec
-            for day in days_vec
-                read_and_regrid(dir, step_regrid, day, month, year, scale_factor, add_offset, range)
-                next!(p)
-            end
-        end
+    for d in dates
+        year  = lpad(Dates.year(d),  4, '0')
+        month = lpad(Dates.month(d), 2, '0')
+        day   = lpad(Dates.day(d),   2, '0')
+        read_and_regrid(dir, step_regrid, day, month, year,
+                        scale_factor, add_offset, range_phys)
+        next!(p)
     end
-
 end
-
