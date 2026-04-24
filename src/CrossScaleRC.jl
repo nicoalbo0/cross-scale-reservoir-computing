@@ -30,10 +30,13 @@ using ProgressMeter
 using Base.Threads
 using ReservoirComputing
 using JLD2
+using NCDatasets
+using Dates
 
 export load_data
 export make_blocks
 export regrid_average
+export read_and_regrid
 
 export run_single_layer
 export run_multi_layer
@@ -53,6 +56,7 @@ export sst_grid_coords
 
 include("types.jl")
 include("data/loading.jl")
+include("data/regrid.jl")
 include("data/grids.jl")
 include("utils/generic.jl")
 include("utils/deeprc_utils.jl")

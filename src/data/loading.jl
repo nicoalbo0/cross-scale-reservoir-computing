@@ -12,10 +12,12 @@ Load SST (sea surface temperature) data for given resolution(s). Dispatches to `
 """
 load_data(res::Vector{Float64}; show_data::Bool=false, refinement::Int,
           lon_range=nothing, lat_range=nothing,
-          anomalies::Bool=false, train_indices=nothing) =
+          anomalies::Bool=false, train_indices=nothing,
+          start_date::Date=Date(1982, 1, 1)) =
     load_sst_data(res; show_data=show_data, refinement=refinement,
                   lon_range=lon_range, lat_range=lat_range,
-                  anomalies=anomalies, train_indices=train_indices)
+                  anomalies=anomalies, train_indices=train_indices,
+                  start_date=start_date)
 
 """
     load_kuramoto_data(Q, L, μ; show_data=false, refinement)
@@ -65,7 +67,8 @@ function load_sst_data(resolutions_vec::Vector{T};
                        lon_range=nothing,
                        lat_range=nothing,
                        anomalies::Bool=false,
-                       train_indices=nothing) where T<:Real
+                       train_indices=nothing,
+                       start_date::Date=Date(1982, 1, 1)) where T<:Real
 
     if anomalies && isnothing(train_indices)
         error("train_indices must be provided when anomalies=true")
@@ -148,7 +151,7 @@ function load_sst_data(resolutions_vec::Vector{T};
         # --- seasonal anomaly removal (on native daily data, before time interpolation) ---
         # train_indices must be expressed in units of the daily (pre-refinement) time series.
         if anomalies
-            data = _remove_climatology(data, train_indices)
+            data = _remove_climatology(data, train_indices; start_date=start_date)
         end
 
         if show_data
@@ -163,7 +166,7 @@ function load_sst_data(resolutions_vec::Vector{T};
 
         if refinement > 1
             data = reshape(data, nlon * nlat, nt)
-            data = cubic_time_interpolate(data, 1.0, refinement)
+            data = cubic_time_interpolate(data, one(eltype(data)), refinement)
             nt = size(data, 2)
             data = reshape(data, nlon, nlat, nt)
         end
@@ -225,23 +228,28 @@ function _domain_indices(nlon::Int, nlat::Int, res::Real, lon_range, lat_range)
 end
 
 """
-    _remove_climatology(data, train_indices) -> Array{Float64,3}
+    _remove_climatology(data, train_indices; start_date=Date(1982,1,1)) -> Array{Float64,3}
 
 Subtract the seasonal climatology from `data` (nlon × nlat × nt).
 
-The climatology is the mean SST for each day-of-year (1–365), computed using only
-the time steps in `train_indices`. Leap-day handling: day 366 is mapped to day 365.
+The climatology is the mean SST for each calendar day-of-year (1–366), computed using
+only the time steps in `train_indices`. `start_date` is the calendar date of `t=1`.
+Day-of-year is computed with `Dates.dayofyear` so leap years are handled correctly
+(no cumulative drift). Leap-day (doy=366) climatology: if no training samples fall on
+doy=366 for a given pixel, that pixel's doy=366 value is set to its doy=365 value to
+avoid a zero offset on leap days during inference.
 """
-function _remove_climatology(data::Array{<:Real, 3}, train_indices)
+function _remove_climatology(data::Array{<:Real, 3}, train_indices;
+                             start_date::Date=Date(1982, 1, 1))
     nlon, nlat, nt = size(data)
     out = copy(data)
 
-    # Accumulate sum and count per doy (1-365) over training period
-    clim_sum   = zeros(Float64, nlon, nlat, 365)
-    clim_count = zeros(Int,     nlon, nlat, 365)
+    # 366 bins: doy=366 is the leap day (Feb 29). Keep it separate from doy=365.
+    clim_sum   = zeros(Float64, nlon, nlat, 366)
+    clim_count = zeros(Int,     nlon, nlat, 366)
 
     for t in train_indices
-        doy = min(mod1(t, 365), 365)   # maps t → 1:365 (simple cyclic; works for daily data)
+        doy = dayofyear(start_date + Day(t - 1))
         @inbounds for j in 1:nlat, i in 1:nlon
             if !isnan(data[i, j, t])
                 clim_sum[i, j, doy]   += data[i, j, t]
@@ -250,11 +258,18 @@ function _remove_climatology(data::Array{<:Real, 3}, train_indices)
         end
     end
 
+    # Fill empty doy=366 pixels with doy=365 (short training windows may miss leap days).
+    @inbounds for j in 1:nlat, i in 1:nlon
+        if clim_count[i, j, 366] == 0 && clim_count[i, j, 365] > 0
+            clim_sum[i, j, 366]   = clim_sum[i, j, 365]
+            clim_count[i, j, 366] = clim_count[i, j, 365]
+        end
+    end
+
     clim = clim_sum ./ max.(clim_count, 1)   # mean; avoid div-by-zero
 
-    # Subtract climatology from all time steps
     for t in 1:nt
-        doy = min(mod1(t, 365), 365)
+        doy = dayofyear(start_date + Day(t - 1))
         @inbounds out[:, :, t] .-= clim[:, :, doy]
     end
 

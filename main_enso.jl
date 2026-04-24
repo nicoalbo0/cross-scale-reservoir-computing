@@ -55,8 +55,11 @@ lat_range = (-36.0, 36.0)    # 36°S  → 36°N  (multiples of 18°)
 
 # Climatology is computed over the TRAINING window expressed in DAILY units
 # (pre-upsampling). load_sst_data removes the seasonal mean before applying
-# the cubic-spline time refinement, so mod1(t, 365) maps correctly.
-train_days_for_clim = (washout + train_len) ÷ sampling_rate   # = 7_750 days
+# the cubic-spline time refinement, so the daily doy mapping is exact.
+# Use train_len only (not washout+train_len): the reservoir's learning window is
+# upsampled steps 1:train_len ↔ daily 1:train_len/sampling_rate. Including the
+# extra `washout` days would leak early forecast-period data into the climatology.
+train_days_for_clim = train_len ÷ sampling_rate   # = 7_500 days (pre-forecast)
 train_indices       = 1:train_days_for_clim
 
 println("Loading SST anomalies (3 resolutions)...")
