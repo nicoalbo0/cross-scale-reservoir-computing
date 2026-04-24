@@ -22,6 +22,7 @@ Pkg.activate(".")
 Pkg.instantiate()
 
 using CrossScaleRC
+using JLD2
 using LinearAlgebra
 using Random
 using Statistics
@@ -29,9 +30,11 @@ using Plots, Measures, LaTeXStrings
 
 BLAS.set_num_threads(1)   # prevent BLAS/Julia-thread contention
 
-# Fix the RNG seed so runs are reproducible and mode comparisons are apples-to-apples
-# (the reservoir's sparse recurrent matrix and input weights are randomly drawn).
-Random.seed!(42)
+# RNG seed — reproducible reservoir draws. Override via ENV["ENSO_SEED"] so an
+# ensemble of seeds can be run without editing the file.
+seed = parse(Int, get(ENV, "ENSO_SEED", "42"))
+Random.seed!(seed)
+seed_tag = "seed$(seed)"
 
 # ---------------------------------------------------------------------------
 # 1. Experiment configuration
@@ -146,6 +149,8 @@ println("    2° fine  : rec=$rec_f,  neigh=$neigh_f,  layer=$layer_f")
 # Bump 18° reservoir size: this is where ENSO's multi-year memory has to live.
 # Bumping 6° to 2000 *degraded* skill (tested) — the existing 6° config was
 # doing real work. 18° has only 3 blocks so N=3000 is memory-cheap.
+# τ=500 (tested) killed the reservoir dynamics — forecast collapsed to DC.
+# τ=50 with g=0.85 remains the best empirical compromise found so far.
 res_size_A = [3_000, 1_000]
 res_rad_A  = [0.85,  0.75]
 degree_A   = [10,    10]
@@ -153,8 +158,6 @@ g_rec_A    = [10^(-1.5)/√rec_vc,   10^(-0.5)/√rec_m]
 g_neigh_A  = [10^(-1.5)/√neigh_vc, 10^(-0.5)/√neigh_m]
 g_layer_A  = [0.0,                  10^(-1.0)/√layer_m]
 ridge_A    = [1e-2,  1e-1]
-# Slow-leak: τ ≫ 2.5 extends reservoir memory timescale. ENSO has 2–7 yr
-# autocorrelation; coarse (18°) needs the longest memory, medium (6°) less so.
 τ_A        = [50.0,  20.0]
 dt_A       = [dt,    dt]
 params_A   = (res_size_A, res_rad_A, degree_A, g_rec_A, g_neigh_A, g_layer_A, τ_A, dt_A)
@@ -377,16 +380,65 @@ lead_months = lead_horizons ./ month_steps
 
 mkpath("results")
 
-# ── Helper: three-panel heatmap per layer ───────────────────────────────────
-function layer_heatmaps(test_mat, pred_mat, scale, title_str)
-    h1 = heatmap(test_mat[:, _pw:end], clim=(-scale, scale), c=:RdBu,
-                 xlabel="step", title="Observed", colorbar=true)
-    h2 = heatmap(pred_mat[:, _pw:end], clim=(-scale, scale), c=:RdBu,
-                 xlabel="step", title="Forecast", colorbar=true)
-    h3 = heatmap(abs.(test_mat[:, _pw:end] .- pred_mat[:, _pw:end]),
-                 clim=(0, scale), c=:Reds,
-                 xlabel="step", title="|Error|", colorbar=true)
-    return plot(h1, h2, h3, size=(900, 300), plot_title=title_str, left_margin=2mm)
+# ── Per-layer equatorial Hovmöller (lon × time), one PNG per layer ──────────
+# Input `mat` is (nlon*nlat, T). Reshape, average over the equatorial band
+# (middle third of lats), and plot as a (lon × time) heatmap so the x-axis is
+# time evolution and the y-axis is longitude — the standard ENSO diagnostic.
+function save_layer_hovmoller(test_mat, pred_mat, nlon, nlat, res_deg,
+                              scale, layer_label, out_path; _pw)
+    test_3d = reshape(test_mat, nlon, nlat, :)[:, :, _pw:end]
+    pred_3d = reshape(pred_mat, nlon, nlat, :)[:, :, _pw:end]
+
+    # Equatorial band: middle third of latitudes (keeps the Niño-style ocean
+    # band) — falls back to all lats if nlat is too small.
+    band = if nlat >= 3
+        lo = max(1, nlat ÷ 3)
+        hi = min(nlat, 2 * nlat ÷ 3 + 1)
+        lo:hi
+    else
+        1:nlat
+    end
+
+    obs_hov  = dropdims(mean(test_3d[:, band, :]; dims=2); dims=2)  # (nlon × T)
+    pred_hov = dropdims(mean(pred_3d[:, band, :]; dims=2); dims=2)
+    err_hov  = abs.(obs_hov .- pred_hov)
+
+    # Axis coordinates: longitude for y-axis (in degrees East), time (days since
+    # forecast start) for x-axis.
+    lons = [mod(-180.0 + res_deg/2 + res_deg*(i-1), 360.0) for i in 1:nlon]
+    # Unwrap to [lons[1], lons[1] + span] for a monotonic axis.
+    for i in 2:length(lons)
+        while lons[i] < lons[i-1]
+            lons[i] += 360.0
+        end
+    end
+    T = size(obs_hov, 2)
+    time_days = (0:T-1) .* dt    # dt in days/step
+
+    # Subplot aspect: pick figure size so each heatmap is readable (neither
+    # 1:30 spaghetti nor crammed). Width is time, height is lon.
+    fig_width  = 1_400
+    fig_height = 900
+
+    args = (
+        xlabel="forecast time (days)",
+        ylabel="longitude (°E)",
+        colorbar=true,
+    )
+    h_obs  = heatmap(time_days, lons, obs_hov;
+                     clim=(-scale, scale), c=:RdBu, title="Observed", args...)
+    h_fore = heatmap(time_days, lons, pred_hov;
+                     clim=(-scale, scale), c=:RdBu, title="Forecast", args...)
+    h_err  = heatmap(time_days, lons, err_hov;
+                     clim=(0, scale), c=:Reds,    title="|Error|",  args...)
+
+    p = plot(h_obs, h_fore, h_err;
+             layout=(3, 1), size=(fig_width, fig_height),
+             plot_title=layer_label,
+             left_margin=5mm, bottom_margin=3mm)
+    savefig(p, out_path)
+    println("Saved: $(out_path)")
+    return p
 end
 
 sc_f = 0.5 * maximum(abs.(fine))
@@ -394,21 +446,28 @@ sc_f = 0.5 * maximum(abs.(fine))
 if mode == :three_layer
     sc_vc = 0.5 * maximum(abs.(very_coarse))
     sc_m  = 0.5 * maximum(abs.(medium))
-    p_vc = layer_heatmaps(test_vc, preds_vc, sc_vc, "Layer 1 — 18° coarse")
-    p_m  = layer_heatmaps(test_m,  preds_m,  sc_m,  "Layer 2 — 6° medium")
-    p_f  = layer_heatmaps(test_f,  preds_f,  sc_f,  "Layer 3 — 2° fine")
-    p_layers = plot(p_vc, p_m, p_f, layout=(3, 1), size=(1_000, 900), left_margin=5mm)
+    save_layer_hovmoller(test_vc, preds_vc,   nlon_vc, nlat_vc, 18.0, sc_vc,
+                         "18° coarse  —  mode=$(mode_tag)  seed=$(seed)",
+                         "results/enso_layer_18deg_$(mode_tag)_$(seed_tag).png"; _pw=_pw)
+    save_layer_hovmoller(test_m,  preds_m,    nlon_m,  nlat_m,  6.0,  sc_m,
+                         "6° medium  —  mode=$(mode_tag)  seed=$(seed)",
+                         "results/enso_layer_6deg_$(mode_tag)_$(seed_tag).png"; _pw=_pw)
+    save_layer_hovmoller(test_f,  preds_f,    nlon_f,  nlat_f,  2.0,  sc_f,
+                         "2° fine  —  mode=$(mode_tag)  seed=$(seed)",
+                         "results/enso_layer_2deg_$(mode_tag)_$(seed_tag).png"; _pw=_pw)
 elseif mode == :two_layer
     sc_m = 0.5 * maximum(abs.(medium))
-    p_m  = layer_heatmaps(test_m, preds_m_B, sc_m, "Layer 1 — 6° medium")
-    p_f  = layer_heatmaps(test_f, preds_f,   sc_f, "Layer 2 — 2° fine")
-    p_layers = plot(p_m, p_f, layout=(2, 1), size=(1_000, 600), left_margin=5mm)
+    save_layer_hovmoller(test_m, preds_m_B, nlon_m, nlat_m, 6.0, sc_m,
+                         "6° medium  —  mode=$(mode_tag)  seed=$(seed)",
+                         "results/enso_layer_6deg_$(mode_tag)_$(seed_tag).png"; _pw=_pw)
+    save_layer_hovmoller(test_f, preds_f,   nlon_f, nlat_f, 2.0, sc_f,
+                         "2° fine  —  mode=$(mode_tag)  seed=$(seed)",
+                         "results/enso_layer_2deg_$(mode_tag)_$(seed_tag).png"; _pw=_pw)
 else   # :single_layer
-    p_f = layer_heatmaps(test_f, preds_f, sc_f, "2° fine (single layer, no cross-scale)")
-    p_layers = plot(p_f, layout=(1, 1), size=(1_000, 300), left_margin=5mm)
+    save_layer_hovmoller(test_f, preds_f, nlon_f, nlat_f, 2.0, sc_f,
+                         "2° fine (single layer)  —  seed=$(seed)",
+                         "results/enso_layer_2deg_$(mode_tag)_$(seed_tag).png"; _pw=_pw)
 end
-savefig(p_layers, "results/enso_layer_heatmaps_$(mode_tag).png")
-println("Saved: results/enso_layer_heatmaps_$(mode_tag).png")
 
 # ── RMSE error curves ───────────────────────────────────────────────────────
 p_rmse = plot(error_curve_f, label="2° fine", lw=2, color=:red,
@@ -448,9 +507,27 @@ hline!(p_lead, [0.0], lw=1.0, linestyle=:dot,  color=:black, label="no skill")
 
 p_skill = plot(p_rmse, p_n34, p_windows, p_lead,
                layout=(2, 2), size=(1_200, 800), left_margin=3mm, bottom_margin=3mm,
-               plot_title="mode = $(mode_tag)")
-savefig(p_skill, "results/enso_skill_summary_$(mode_tag).png")
-println("Saved: results/enso_skill_summary_$(mode_tag).png")
+               plot_title="mode = $(mode_tag)   seed = $(seed)")
+savefig(p_skill, "results/enso_skill_summary_$(mode_tag)_$(seed_tag).png")
+println("Saved: results/enso_skill_summary_$(mode_tag)_$(seed_tag).png")
+
+# Persist predictions for ensemble aggregation later.
+jldsave("results/enso_preds_$(mode_tag)_$(seed_tag).jld2";
+        n34_true     = n34_true,
+        n34_pred     = n34_pred,
+        preds_f      = preds_f,
+        test_f       = test_f,
+        lead_horizons= collect(lead_horizons),
+        lead_accs    = lead_accs,
+        lead_rmses   = lead_rmses,
+        window_accs  = window_accs,
+        window_rmses = window_rmses,
+        full_acc     = sc.acc,
+        full_rmse    = sc.rmse,
+        full_rmse_skill = sc.rmse_skill,
+        seed         = seed,
+        mode_tag     = mode_tag)
+println("Saved: results/enso_preds_$(mode_tag)_$(seed_tag).jld2")
 
 try display(p_layers); catch end
 try display(p_skill);  catch end

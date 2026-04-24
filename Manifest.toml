@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "06f9213136f01b7d7d117484fcaa55ec42856e45"
+project_hash = "353e54164d093a1ad4e6bfb3f8b5abafe544a7d4"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -281,7 +281,7 @@ uuid = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
 version = "4.1.1"
 
 [[deps.CrossScaleRC]]
-deps = ["CSV", "DataFrames", "DelimitedFiles", "FFTW", "Functors", "Interpolations", "JLD2", "LaTeXStrings", "LinearAlgebra", "Measures", "NCDatasets", "Plots", "ProgressMeter", "Random", "ReservoirComputing", "Revise", "SparseArrays", "Statistics", "Test"]
+deps = ["CSV", "DataFrames", "Dates", "DelimitedFiles", "FFTW", "Functors", "Interpolations", "JLD2", "LaTeXStrings", "LinearAlgebra", "Measures", "NCDatasets", "Plots", "ProgressMeter", "Random", "ReservoirComputing", "Revise", "SparseArrays", "Statistics", "Test"]
 path = "."
 uuid = "ad7fa110-6354-4f83-a0e9-63f5579099cc"
 version = "0.1.0"
@@ -514,6 +514,11 @@ deps = ["Artifacts", "GettextRuntime_jll", "JLLWrappers", "Libdl", "Libffi_jll",
 git-tree-sha1 = "6b4d2dc81736fe3980ff0e8879a9fc7c33c44ddf"
 uuid = "7746bdde-850d-59dc-9ae8-88ece973131d"
 version = "2.86.2+0"
+
+[[deps.Glob]]
+git-tree-sha1 = "83cb0092e2792b9e3a865b6655e88f5b862607e2"
+uuid = "c27321d9-0574-5035-807b-f59d2c89b15c"
+version = "1.4.0"
 
 [[deps.Graphite2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
