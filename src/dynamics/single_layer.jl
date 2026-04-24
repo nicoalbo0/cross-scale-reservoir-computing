@@ -67,31 +67,55 @@ end
     generate_reservoir(params, input_dimensions; input_mode=:structured)
 
 Build a `Reservoir`: sparse recurrent matrix (spectral radius from params), input weights
-via `build_W_in`, and dt_τ = dt/τ. `params` = (N, g, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt).
+via `build_W_in`, and per-neuron dt/τ.
+`params` = (N, g, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt), where `τ` is either
+- a scalar `Real` → all N neurons share τ (classical single-timescale reservoir)
+- a 2-tuple `(τ_min, τ_max)` → log-uniform distribution of τ across neurons
+  (mixed-timescale reservoir: the i-th neuron gets τ = τ_min (τ_max/τ_min)^((i-1)/(N-1)))
+- an `AbstractVector` of length N → explicit per-neuron τ.
 """
-function generate_reservoir(params::Tuple{Int, T, Int, T, T, T, T, T}, input_dimensions::Tuple{Int, Int, Int}; input_mode::Symbol) where T<:Real
+function generate_reservoir(params::Tuple, input_dimensions::Tuple{Int, Int, Int}; input_mode::Symbol)
     N, g, degree, g_in_rec, g_in_neigh, g_in_layer, τ, dt = params
     rec_dimensions, neigh_dimensions, layer_dimensions = input_dimensions
     sparsity = degree / N
+    T = typeof(float(g))
 
-    W = sprandn(N, N, sparsity)
+    W = sprandn(T, N, N, sparsity)
     ρ = maximum(abs.(eigvals(Matrix(W))))
-    W .*= g / ρ
+    W .*= T(g) / ρ
 
-    # input weight matrix
     W_in_rec, W_in_neigh, W_in_layer = build_W_in(
         N,
         rec_dimensions,
         neigh_dimensions,
         layer_dimensions,
-        g_in_rec,
-        g_in_neigh,
-        g_in_layer;
+        T(g_in_rec),
+        T(g_in_neigh),
+        T(g_in_layer);
         mode = input_mode
     )
 
-    dt_τ = dt/τ
-    
+    # Per-neuron leak rate.
+    dt_τ = Vector{T}(undef, N)
+    if isa(τ, Real)
+        fill!(dt_τ, T(dt / τ))
+    elseif isa(τ, Tuple) && length(τ) == 2
+        τ_min, τ_max = T(τ[1]), T(τ[2])
+        @assert τ_min > 0 && τ_max > 0 "τ_min and τ_max must be positive"
+        # log-uniform from τ_min to τ_max across the N neurons
+        log_τs = range(log(τ_min), log(τ_max); length=N)
+        @inbounds for k in 1:N
+            dt_τ[k] = T(dt) / exp(log_τs[k])
+        end
+    elseif isa(τ, AbstractVector)
+        length(τ) == N || error("τ vector length ($(length(τ))) must equal N ($N)")
+        @inbounds for k in 1:N
+            dt_τ[k] = T(dt / τ[k])
+        end
+    else
+        error("Unsupported τ type: $(typeof(τ)). Use Real, Tuple{Real,Real}, or AbstractVector.")
+    end
+
     return Reservoir{T}(W, dt_τ, W_in_rec, W_in_neigh, W_in_layer)
 end
 
@@ -178,8 +202,8 @@ function train_parallel_reservoir(
             mul!(Win_layer_u,  reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(x)
-                x[k] = (1 - reservoir.dt_τ) .* x[k] + reservoir.dt_τ .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
-
+                α = reservoir.dt_τ[k]
+                x[k] = (1 - α) * x[k] + α * tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
             end
 
             # target is u_rec at time t+1
@@ -263,8 +287,8 @@ function test_parallel_reservoir(
             mul!(Win_layer_u, reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(bm.x)
-                #bm.x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
-                bm.x[k] = (1 - reservoir.dt_τ) .* bm.x[k] + reservoir.dt_τ .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
+                α = reservoir.dt_τ[k]
+                bm.x[k] = (1 - α) * bm.x[k] + α * tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
             end
         end
     end
@@ -301,8 +325,8 @@ function test_parallel_reservoir(
             mul!(Win_layer_u, reservoir.W_in_layer, u_layer)
 
             @inbounds for k in eachindex(bm.x)
-                #bm.x[k] = tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
-                bm.x[k] = (1 - reservoir.dt_τ) .* bm.x[k] + reservoir.dt_τ .* tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
+                α = reservoir.dt_τ[k]
+                bm.x[k] = (1 - α) * bm.x[k] + α * tanh(W_x[k] + Win_rec_u[k] + Win_neigh_u[k] + Win_layer_u[k])
             end
         end
     end
@@ -317,7 +341,7 @@ Full single-layer pipeline: build reservoir, train block readouts, run test. Ret
 `(preds, training_prediction, training_data, X, block_models)`.
 """
 function run_single_layer(
-    params::Tuple{Int, T, Int, T, T, T, T, T},
+    params::Tuple,
     data::Matrix{T},
     data_layer::Matrix{T},
     train_time::Int,

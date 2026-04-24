@@ -19,18 +19,19 @@ end
 """
     Reservoir{T<:Real}
 
-Echo state network reservoir: recurrent weights, leak rate, and input projections.
+Echo state network reservoir: recurrent weights, per-neuron leak rate, and input projections.
 
 # Fields
 - `W`: Sparse recurrent weight matrix (N×N).
-- `dt_τ`: Leaking rate factor (dt/τ) for the reservoir state update.
+- `dt_τ`: Per-neuron leaking rate (dt/τ), length N. A uniform vector recovers the
+  single-timescale reservoir; a distribution spans multiple memory timescales.
 - `W_in_rec`: Input weights for recurrent (local) inputs.
 - `W_in_neigh`: Input weights for neighbor inputs.
 - `W_in_layer`: Input weights for cross-layer (coarse) inputs.
 """
 struct Reservoir{T<:Real}
     W::SparseMatrixCSC{T,Int}
-    dt_τ::T
+    dt_τ::Vector{T}
     W_in_rec::Matrix{T}
     W_in_neigh::Matrix{T}
     W_in_layer::Matrix{T}

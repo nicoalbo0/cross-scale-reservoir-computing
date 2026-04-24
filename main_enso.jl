@@ -147,18 +147,21 @@ println("    2° fine  : rec=$rec_f,  neigh=$neigh_f,  layer=$layer_f")
 
 # ── Call A: coarse (18°) → medium (6°) ──────────────────────────────────────
 # Bump 18° reservoir size: this is where ENSO's multi-year memory has to live.
-# Bumping 6° to 2000 *degraded* skill (tested) — the existing 6° config was
-# doing real work. 18° has only 3 blocks so N=3000 is memory-cheap.
-# τ=500 (tested) killed the reservoir dynamics — forecast collapsed to DC.
-# τ=50 with g=0.85 remains the best empirical compromise found so far.
+# Mixed-timescale reservoir: the 18° layer uses a log-uniform τ distribution
+# (τ_min, τ_max) across its N=3000 neurons. Slow neurons (τ≈500) retain ENSO-
+# scale memory; fast neurons (τ≈2.5) track high-frequency variability. A
+# uniform long-τ reservoir (tested at τ=500) collapsed to DC — the
+# distribution gives the reservoir a working *range* of timescales to draw on.
 res_size_A = [3_000, 1_000]
+# Narrow mixed-τ range — 20× from 5 to 100 — so dynamics stay coherent
+# at g=0.85 (which was the best single-τ config) rather than needing to damp.
 res_rad_A  = [0.85,  0.75]
 degree_A   = [10,    10]
 g_rec_A    = [10^(-1.5)/√rec_vc,   10^(-0.5)/√rec_m]
 g_neigh_A  = [10^(-1.5)/√neigh_vc, 10^(-0.5)/√neigh_m]
 g_layer_A  = [0.0,                  10^(-1.0)/√layer_m]
 ridge_A    = [1e-2,  1e-1]
-τ_A        = [50.0,  20.0]
+τ_A        = Any[(5.0, 100.0), 20.0]       # 18° → narrow log-uniform mix
 dt_A       = [dt,    dt]
 params_A   = (res_size_A, res_rad_A, degree_A, g_rec_A, g_neigh_A, g_layer_A, τ_A, dt_A)
 
