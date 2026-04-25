@@ -8,6 +8,7 @@
 #   (3) Side-by-side SST-anomaly maps (observed / ens-mean forecast / difference)
 #       at several lead times.
 
+ENV["GKSwstype"] = "100"
 using Pkg; Pkg.activate(joinpath(@__DIR__, ".."))
 using CrossScaleRC, JLD2, LinearAlgebra, Statistics, Plots, Measures, Glob
 

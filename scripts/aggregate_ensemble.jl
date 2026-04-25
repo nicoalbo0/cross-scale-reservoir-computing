@@ -6,6 +6,7 @@
 #   julia --project=. scripts/aggregate_ensemble.jl [mode_tag]
 # Default mode_tag = "three_layer".
 
+ENV["GKSwstype"] = "100"
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 

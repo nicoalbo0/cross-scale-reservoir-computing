@@ -17,6 +17,8 @@
 #   julia --threads auto main_enso.jl
 # Results are saved to results/ as PNG files.
 
+ENV["GKSwstype"] = "100"   # no interactive GKS window — script-only
+
 using Pkg, Revise
 Pkg.activate(".")
 Pkg.instantiate()
@@ -532,8 +534,7 @@ jldsave("results/enso_preds_$(mode_tag)_$(seed_tag).jld2";
         mode_tag     = mode_tag)
 println("Saved: results/enso_preds_$(mode_tag)_$(seed_tag).jld2")
 
-try display(p_layers); catch end
-try display(p_skill);  catch end
+# display() suppressed — no interactive popups; PNGs already saved.
 
 # ---------------------------------------------------------------------------
 # 11. Summary table

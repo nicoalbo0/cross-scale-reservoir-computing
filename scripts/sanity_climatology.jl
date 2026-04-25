@@ -7,6 +7,7 @@
 # climatology should sit on the seasonal envelope of the raw SST and
 # produce a zero-mean anomaly series with no residual annual cycle.
 
+ENV["GKSwstype"] = "100"
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 

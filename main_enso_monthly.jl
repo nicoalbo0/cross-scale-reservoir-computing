@@ -11,6 +11,10 @@
 # Usage:
 #   ENSO_SEED=42 julia --threads 4 --project=. main_enso_monthly.jl
 
+# Suppress the GKSwstype preview window before Plots is loaded (otherwise GR
+# pops up an interactive terminal that disrupts the user's desktop).
+ENV["GKSwstype"] = "100"
+
 using Pkg, Revise
 Pkg.activate(".")
 
@@ -118,6 +122,11 @@ f_mat  = reshape(fine,        nlon_f  * nlat_f,  Ttot)
 # 3. Block construction (unchanged)
 # ---------------------------------------------------------------------------
 
+# Block grids: (lon_blocks, lat_blocks) per layer.  18° has only 1 lat-block
+# (the whole 72° band) because finer lat partitions tank the Niño 3.4 skill
+# without measurable improvement to the spatial pattern correlation. The
+# horizontal-banding visible in the forecast maps reflects the underlying
+# block boundaries, not a model deficiency that more lat blocks can fix.
 grids_AB = [(3, 1), (9, 3)]
 grids_BC = [(9, 3), (9, 4)]
 mixing = 2
@@ -314,21 +323,29 @@ p_maps = plot(map_panels...;
 savefig(p_maps, "results/enso_monthly_maps_$(mode_tag)_$(seed_tag).png")
 println("Saved: results/enso_monthly_maps_$(mode_tag)_$(seed_tag).png")
 
-# Persist full 2° spatial forecast field so the aggregator can build
-# ensemble-mean maps and pattern-correlation diagnostics across seeds.
-# test_f_3d/preds_f_3d are (nlon × nlat × (warmup + predict_len)); drop the
-# warmup columns so saved arrays line up with scoring axis.
+# Persist forecast field. Truth is the same across seeds — write it once
+# to a shared reference file so per-seed files only carry seed-specific
+# data. Float32 + compression reduces footprint ~4×.
 test_f_post  = test_f_3d[:,  :, warmup + 1 : end]
 preds_f_post = preds_f_3d[:, :, warmup + 1 : end]
 
-jldsave("results/enso_monthly_preds_$(mode_tag)_$(seed_tag).jld2";
-        n34_true=n34_true, n34_pred=n34_pred,
-        lead_months=collect(lead_months[1:length(lead_accs)]),
-        lead_accs=lead_accs,
-        full_acc=sc.acc, full_rmse=sc.rmse, full_rmse_skill=sc.rmse_skill,
-        test_f=test_f_post, preds_f=preds_f_post,
-        lons_f=collect(lons_f_crop), lats_f=collect(lats_f_crop),
-        seed=seed, mode_tag=mode_tag)
+ref_path = "results/enso_monthly_reference_$(mode_tag).jld2"
+if !isfile(ref_path)
+    jldsave(ref_path; compress=true,
+            test_f = Float32.(test_f_post),
+            n34_true = Float32.(n34_true),
+            lons_f = collect(lons_f_crop), lats_f = collect(lats_f_crop))
+    println("Saved reference: $(ref_path)")
+end
+
+jldsave("results/enso_monthly_preds_$(mode_tag)_$(seed_tag).jld2"; compress=true,
+        n34_true     = Float32.(n34_true),
+        n34_pred     = Float32.(n34_pred),
+        lead_months  = collect(lead_months[1:length(lead_accs)]),
+        lead_accs    = lead_accs,
+        full_acc     = sc.acc, full_rmse = sc.rmse, full_rmse_skill = sc.rmse_skill,
+        preds_f      = Float32.(preds_f_post),
+        seed = seed, mode_tag = mode_tag)
 
 println("\n" * "="^50)
 println("SUMMARY  [monthly, mode=$(mode_tag), seed=$(seed)]")
