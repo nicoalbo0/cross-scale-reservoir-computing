@@ -131,8 +131,15 @@ f_mat  = reshape(fine,        nlon_f  * nlat_f,  Ttot)
 # without measurable improvement to the spatial pattern correlation. The
 # horizontal-banding visible in the forecast maps reflects the underlying
 # block boundaries, not a model deficiency that more lat blocks can fix.
-grids_AB = [(3, 1), (9, 3)]
-grids_BC = [(9, 3), (9, 4)]
+# Per-layer (lon_blocks, lat_blocks). Env-overridable for grid sweeps.
+g18_lon = parse(Int, get(ENV, "ENSO_GRID_18LON", "3"))
+g18_lat = parse(Int, get(ENV, "ENSO_GRID_18LAT", "1"))
+g6_lon  = parse(Int, get(ENV, "ENSO_GRID_6LON",  "9"))
+g6_lat  = parse(Int, get(ENV, "ENSO_GRID_6LAT",  "3"))
+g2_lon  = parse(Int, get(ENV, "ENSO_GRID_2LON",  "9"))
+g2_lat  = parse(Int, get(ENV, "ENSO_GRID_2LAT",  "4"))
+grids_AB = [(g18_lon, g18_lat), (g6_lon, g6_lat)]
+grids_BC = [(g6_lon, g6_lat),   (g2_lon, g2_lat)]
 mixing = 2
 
 blocks_AB = make_blocks(data_vec[1:2], grids_AB, mixing)
@@ -153,25 +160,45 @@ rec_f,  neigh_f,  layer_f = input_dimensions(blocks_f)
 
 # Memory target: 18° needs 2-4 yr memory (24-48 months). With α=dt/τ, decay
 # (1-α)^24 ≈ 0.5 requires α ≈ 0.029 → τ ≈ 35. 6° faster (~1 yr), 2° even faster.
-res_size_A = [500,   500]
-res_rad_A  = [0.85,  0.75]
+# All τ / ridge values are env-overridable so a sweep can vary them per run
+# without editing source. Defaults are the original hand-tuned values.
+τ_coarse  = parse(Float64, get(ENV, "ENSO_TAU_COARSE",  "30.0"))
+τ_mid     = parse(Float64, get(ENV, "ENSO_TAU_MID",     "10.0"))
+τ_fine    = parse(Float64, get(ENV, "ENSO_TAU_FINE",     "3.0"))
+ridge_coarse = parse(Float64, get(ENV, "ENSO_RIDGE_COARSE", "1e-3"))
+ridge_mid    = parse(Float64, get(ENV, "ENSO_RIDGE_MID",    "1e-2"))
+ridge_fine   = parse(Float64, get(ENV, "ENSO_RIDGE_FINE",   "1.0"))
+# Cross-scale layer-input strength (log10 exponent) for the layer_input column
+# of the COARSER side of each call; defaults reproduce 10^(-1.0)/√layer.
+glayer_A_exp = parse(Float64, get(ENV, "ENSO_GLAYER_A_EXP", "-1.0"))
+glayer_B_exp = parse(Float64, get(ENV, "ENSO_GLAYER_B_EXP", "-1.0"))
+
+N_coarse  = parse(Int,     get(ENV, "ENSO_N_COARSE",   "500"))
+N_mid     = parse(Int,     get(ENV, "ENSO_N_MID",      "500"))
+N_fine    = parse(Int,     get(ENV, "ENSO_N_FINE",     "500"))
+rad_coarse = parse(Float64, get(ENV, "ENSO_RAD_COARSE", "0.85"))
+rad_mid    = parse(Float64, get(ENV, "ENSO_RAD_MID",    "0.75"))
+rad_fine   = parse(Float64, get(ENV, "ENSO_RAD_FINE",   "0.55"))
+
+res_size_A = [N_coarse,  N_mid]
+res_rad_A  = [rad_coarse, rad_mid]
 degree_A   = [10,    10]
 g_rec_A    = [10^(-1.5)/√rec_vc,   10^(-0.5)/√rec_m]
 g_neigh_A  = [10^(-1.5)/√neigh_vc, 10^(-0.5)/√neigh_m]
-g_layer_A  = [0.0,                  10^(-1.0)/√layer_m]
-ridge_A    = [1e-3,  1e-2]
-τ_A        = [30.0,  10.0]   # months
+g_layer_A  = [0.0,                  10^(glayer_A_exp)/√layer_m]
+ridge_A    = [ridge_coarse, ridge_mid]
+τ_A        = [τ_coarse,     τ_mid]   # months
 dt_A       = [dt,    dt]
 params_A   = (res_size_A, res_rad_A, degree_A, g_rec_A, g_neigh_A, g_layer_A, τ_A, dt_A)
 
-res_size_B = [500,   500]
-res_rad_B  = [0.75,  0.55]
+res_size_B = [N_mid, N_fine]
+res_rad_B  = [rad_mid, rad_fine]
 degree_B   = [10,    10]
 g_rec_B    = [10^(-0.5)/√rec_m,   10^(-0.5)/√rec_f]
 g_neigh_B  = [10^(-0.5)/√neigh_m, 10^(-0.5)/√neigh_f]
-g_layer_B  = [0.0,                 10^(-1.0)/√layer_f]
-ridge_B    = [1e-2,  parse(Float64, get(ENV, "ENSO_RIDGE_FINE", "1.0"))]
-τ_B        = [10.0,  parse(Float64, get(ENV, "ENSO_TAU_FINE",   "3.0"))]
+g_layer_B  = [0.0,                 10^(glayer_B_exp)/√layer_f]
+ridge_B    = [ridge_mid, ridge_fine]
+τ_B        = [τ_mid,    τ_fine]
 dt_B       = [dt,    dt]
 params_B   = (res_size_B, res_rad_B, degree_B, g_rec_B, g_neigh_B, g_layer_B, τ_B, dt_B)
 
