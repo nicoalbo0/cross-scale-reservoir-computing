@@ -10,16 +10,43 @@ Conventions:
 
 ---
 
-## Settled defaults (state of the art for monthly 3L pixel)
+## ⚠ Correction (2026-04-27): always check RMSE + std_ratio alongside ACC
 
-After E1-E10, the best 3L configuration on both 12-mo Niño 3.4 ACC and 12-mo
-spatial pattern correlation is:
+The E5 result "1L τ=30 wins on Niño 3.4 ACC at 0.891" is a metric artifact.
+1L τ=30 produces a forecast with only 18% of the truth's amplitude
+(std_ratio = 0.18, range ~[−0.3, 0.3] vs truth ~[−2.0, 1.1]). High ACC
+because the phase is right; low actual fidelity because magnitude is crushed.
+
+**By RMSE (actual error in physical units), 3L tauC15 dominates:**
+
+| Architecture | 12-mo ACC | 12-mo RMSE | std_ratio |
+|---|---|---|---|
+| 3L tauC15    | 0.831     | **0.469**  | 1.35      |
+| 3L baseline  | 0.828     | 0.480      | 1.37      |
+| 1L τ=30      | 0.891     | 0.613      | 0.18 ⚠   |
+
+The honest claim: **3L is the better ENSO forecaster on every meaningful
+metric**. 1L τ=30 just exploits ACC's amplitude-invariance.
+
+Mechanism: τ=30 in a *single* reservoir over-damps the closed-loop dynamics
+(α=1/30). The autonomous attractor decays toward zero; phase is preserved
+but magnitude isn't. 3L avoids this because the fine layer (τ=3) keeps the
+dynamics "alive" while the coarse layer carries the slow envelope.
+
+**Lesson:** when comparing forecast configurations, always report RMSE and
+std_ratio. ACC alone hides the damped-prediction failure mode.
+
+---
+
+## Settled defaults (state of the art for monthly 3L pixel) — UPDATED E11
+
+After the E11 joint multi-axis sweep, the best 3L configuration is:
 
 ```
 mode = three_layer
 τ_coarse=15, τ_mid=10, τ_fine=3
-ridge_coarse=1e-3, ridge_mid=1e-2, ridge_fine=1.0
-g_layer_A_exp=-1.0, g_layer_B_exp=-1.0
+ridge_coarse=1e-3, ridge_mid=1e-2, ridge_fine=3.0   ← was 1.0
+g_layer_A_exp=-0.5, g_layer_B_exp=-1.0              ← A side: stronger
 N_coarse=N_mid=N_fine=500
 rad_coarse=0.85, rad_mid=0.75, rad_fine=0.55
 grids: (3,1) → (9,3) → (9,4)
@@ -27,8 +54,13 @@ mixing=2
 regression=quadratic
 ```
 
-→ **12-mo Niño 3.4 ACC = 0.831 ± 0.014** (range 0.819-0.847 across 8 seeds)
-→ **12-mo spatial pc = 0.424** (ensemble mean across 8 seeds)
+→ **12-mo Niño 3.4 ACC = 0.836 ± noise** (8-seed ensemble mean)
+→ **12-mo Niño 3.4 RMSE = 0.455** (was 0.469 at tauC15 default; baseline 0.480)
+→ **12-mo spatial pc = 0.450** (was 0.424 at tauC15; baseline 0.415)
+→ **std_ratio = 1.03** (was 1.35 — now near-perfect amplitude match)
+
+This config wins on ALL three metrics simultaneously vs the previous best.
+Run as: `ENSO_TAU_COARSE=15 ENSO_GLAYER_A_EXP=-0.5 ENSO_RIDGE_FINE=3.0`
 
 **Hyperparameter sensitivity ranking (high → low):**
 1. τ_fine — sharp sweet spot at 3; 10+ collapses model.
@@ -47,6 +79,39 @@ architecture. Going beyond requires structural change — see project memory
 `project_temporal_multiscale_idea.md`.
 
 ---
+
+## E11 — 3L joint multi-axis sweep + Pareto analysis (2026-04-27/28)
+**Question:** can simultaneous improvement on all three metrics (ACC, RMSE,
+spatial pc) be found in the joint hyperparameter space, beyond what 1D
+scans showed?
+**Setup:**
+- Phase 1: 2D grid (g_layer_B_exp × ridge_fine), 14 cells × 3 seeds.
+- Phase 2: 1D explorations of g_layer_A_exp (3 levels) and τ_mid (2 levels),
+  each × 3 seeds.
+- Phase 3: confirm Pareto candidates at 8 seeds.
+- Aggregator computes ACC, RMSE, std_ratio, 12-mo spatial pc per config and
+  finds Pareto frontier on (RMSE↓, pc↑).
+**Outcome:** **clean win on all three metrics**.
+
+8-seed Pareto-optimal config: g_layer_A_exp=-0.5, ridge_fine=3.0, tauC15
+(`gAm0p5_rF3_8seed`):
+- ACC=0.836 (+0.005 vs tauC15 baseline)
+- RMSE=0.455 (-3% vs 0.469)
+- spatial pc=0.450 (+6% vs 0.424) — first 8-seed config above 0.45
+- std_ratio=1.03 (was 1.35) — nearly perfect amplitude match
+
+Architectural insight: the optimal 3L cross-scale wiring is **asymmetric**.
+- A-side (18°→6°): **stronger** than default (g_layer_A_exp=-0.5 vs -1.0)
+- B-side (6°→2°): default (g_layer_B_exp=-1.0)
+- Asymmetric A-strong + B-weak (gAm0p5_gBm2) reverts to the same trade-off
+  as gBm2p0 alone (RMSE OK, pc collapses to 0.324). The strong-A win works
+  only when paired with default-B.
+
+ridge_fine=3.0 prevents amplitude over-shoot — std_ratio drops from 1.35 to
+1.03 (matching truth's amplitude almost exactly).
+
+**Adopted as new 3L default.**
+**Output:** `results/tune_3L/gAm0p5_rF3_8seed/`, `results/tune_3L_pareto.png`.
 
 ## E10 — 3L capacity + spectral-radius sweep (2026-04-27)
 **Question:** does scaling N_coarse, N_fine, rad_coarse, rad_fine break the
