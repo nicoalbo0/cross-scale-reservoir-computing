@@ -36,9 +36,13 @@ seed_tag = "seed$(seed)"
 # 1. Configuration
 # ---------------------------------------------------------------------------
 
-mode = :three_layer
+mode = Symbol(get(ENV, "ENSO_MODE", "three_layer"))
 @assert mode in (:three_layer, :two_layer, :single_layer)
 mode_tag = String(mode)
+
+# Output subfolder. Default "results"; set ENSO_OUTDIR=results/<exp_tag> to
+# namespace per experiment so artifacts from different runs don't collide.
+outdir = get(ENV, "ENSO_OUTDIR", "results")
 
 # Monthly pipeline: 1 reservoir step = 1 calendar month.
 # 1982-01..2015-12 = 34 yr × 12 = 408 months total.
@@ -166,8 +170,8 @@ degree_B   = [10,    10]
 g_rec_B    = [10^(-0.5)/√rec_m,   10^(-0.5)/√rec_f]
 g_neigh_B  = [10^(-0.5)/√neigh_m, 10^(-0.5)/√neigh_f]
 g_layer_B  = [0.0,                 10^(-1.0)/√layer_f]
-ridge_B    = [1e-2,  1.0]
-τ_B        = [10.0,  3.0]
+ridge_B    = [1e-2,  parse(Float64, get(ENV, "ENSO_RIDGE_FINE", "1.0"))]
+τ_B        = [10.0,  parse(Float64, get(ENV, "ENSO_TAU_FINE",   "3.0"))]
 dt_B       = [dt,    dt]
 params_B   = (res_size_B, res_rad_B, degree_B, g_rec_B, g_neigh_B, g_layer_B, τ_B, dt_B)
 
@@ -254,7 +258,7 @@ for L in lead_months
     println("  $(L) mo : ACC=$(round(s.acc; digits=3))   RMSE=$(round(s.rmse; digits=4))")
 end
 
-mkpath("results")
+mkpath(outdir)
 # Niño 3.4 time series plot
 p1 = plot(n34_true; lw=2.5, color=:black, label="Observed",
           xlabel="month since forecast start", ylabel="Niño 3.4 (norm.)",
@@ -271,8 +275,8 @@ hline!(p2, [0.5]; ls=:dash, color=:gray, label="ACC=0.5 (useful)")
 hline!(p2, [0.0]; ls=:dot,  color=:black, label="no skill")
 
 p = plot(p1, p2; layout=(2, 1), size=(1200, 700), left_margin=4mm)
-savefig(p, "results/enso_monthly_$(mode_tag)_$(seed_tag).png")
-println("\nSaved: results/enso_monthly_$(mode_tag)_$(seed_tag).png")
+savefig(p, joinpath(outdir, "enso_monthly_$(mode_tag)_$(seed_tag).png"))
+println("\nSaved: $(joinpath(outdir, "enso_monthly_$(mode_tag)_$(seed_tag).png"))")
 
 # ── Geographic snapshot maps — 2° resolution, observed vs forecast ─────────
 # Show the SST-anomaly field at selected lead times so spatial coverage of
@@ -320,8 +324,8 @@ p_maps = plot(map_panels...;
               size = (1600, 320 * n_leads),
               plot_title = "2° SST anomaly maps  —  seed=$(seed)  mode=$(mode_tag)",
               left_margin = 4mm, bottom_margin = 2mm)
-savefig(p_maps, "results/enso_monthly_maps_$(mode_tag)_$(seed_tag).png")
-println("Saved: results/enso_monthly_maps_$(mode_tag)_$(seed_tag).png")
+savefig(p_maps, joinpath(outdir, "enso_monthly_maps_$(mode_tag)_$(seed_tag).png"))
+println("Saved: $(joinpath(outdir, "enso_monthly_maps_$(mode_tag)_$(seed_tag).png"))")
 
 # Persist forecast field. Truth is the same across seeds — write it once
 # to a shared reference file so per-seed files only carry seed-specific
@@ -329,7 +333,7 @@ println("Saved: results/enso_monthly_maps_$(mode_tag)_$(seed_tag).png")
 test_f_post  = test_f_3d[:,  :, warmup + 1 : end]
 preds_f_post = preds_f_3d[:, :, warmup + 1 : end]
 
-ref_path = "results/enso_monthly_reference_$(mode_tag).jld2"
+ref_path = joinpath(outdir, "enso_monthly_reference_$(mode_tag).jld2")
 if !isfile(ref_path)
     jldsave(ref_path; compress=true,
             test_f = Float32.(test_f_post),
@@ -338,7 +342,7 @@ if !isfile(ref_path)
     println("Saved reference: $(ref_path)")
 end
 
-jldsave("results/enso_monthly_preds_$(mode_tag)_$(seed_tag).jld2"; compress=true,
+jldsave(joinpath(outdir, "enso_monthly_preds_$(mode_tag)_$(seed_tag).jld2"); compress=true,
         n34_true     = Float32.(n34_true),
         n34_pred     = Float32.(n34_pred),
         lead_months  = collect(lead_months[1:length(lead_accs)]),

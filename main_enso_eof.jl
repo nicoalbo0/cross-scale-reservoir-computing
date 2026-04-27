@@ -112,7 +112,7 @@ res_rad  = 0.85
 degree   = 10
 g_in     = 0.5
 τ        = 30.0
-ridge    = 1e-2
+ridge    = parse(Float64, get(ENV, "ENSO_RIDGE", "1e-2"))
 
 # Build a single-layer block (no spatial partitioning — one block covers all K modes).
 blocks = make_blocks(K, 1, 0)            # 1D block: 1 block covering all K dims, no neighbor mixing
@@ -251,7 +251,7 @@ println("Saved: results/enso_eof_maps_$(seed_tag_full).png")
 # (truth_test, EOFs, pixel_means, lons/lats) is identical across seeds — write
 # it ONCE to results/enso_eof_reference.jld2; per-seed file holds only the
 # seed-specific forecast.
-ref_path = "results/enso_eof_reference.jld2"
+ref_path = "results/enso_eof_reference_K$(K).jld2"
 if !isfile(ref_path)
     jldsave(ref_path; compress=true,
             truth_test = Float32.(truth_test),
