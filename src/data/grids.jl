@@ -204,70 +204,95 @@ function make_blocks_single_layer_2d(
 end
 
 """
-    add_cross_layer!(fine_blocks, coarse_blocks, nlon_f, nlat_f, nlon_c, nlat_c)
+    add_cross_layer!(fine_blocks, coarse_blocks, nlon_f, nlat_f, nlon_c, nlat_c; overlap_mode=:exclude)
 
-In-place: set each fine block's `rows_layer` to the parent coarse block's `rows_rec`
-using 2D index mapping. Fine grid dimensions must be multiples of coarse.
+In-place: set each fine block's `rows_layer` to indices in the parent coarse
+block's recurrent set, using 2D index mapping. Fine grid dimensions must be
+multiples of coarse.
+
+`overlap_mode`:
+- `:exclude` (paper-faithful, default): drop the coarse cells that coincide
+  with the fine block's own spatial support, so the cross-scale input is
+  strictly *non-redundant* with the fine block's recurrent input.
+  Matches arXiv:2510.11209 §1.3: "only the nonoverlapping portion of the
+  coarser reservoir output is included."
+- `:include`: pass the entire parent coarse block — overlap retained.
+  (Pre-paper behavior; left available for ablation.)
 """
 function add_cross_layer!(
     fine_blocks,
     coarse_blocks,
     nlon_f, nlat_f,
-    nlon_c, nlat_c
+    nlon_c, nlat_c;
+    overlap_mode::Symbol = :exclude
 )
 
     @assert nlon_f % nlon_c == 0
     @assert nlat_f % nlat_c == 0
+    @assert overlap_mode === :exclude || overlap_mode === :include
 
     scale_lon = div(nlon_f, nlon_c)
     scale_lat = div(nlat_f, nlat_c)
+
+    # map a fine pixel's flat index to the coarse cell's flat index
+    function fine_to_coarse_idx(idx)
+        i_f = div(idx-1, nlat_f) + 1
+        j_f = mod(idx-1, nlat_f) + 1
+        i_c = cld(i_f, scale_lon)
+        j_c = cld(j_f, scale_lat)
+        return linear_index(i_c, j_c, nlat_c)
+    end
 
     for k in eachindex(fine_blocks)
 
         fb = fine_blocks[k]
 
-        # take first recurrent index to identify parent block
-        idx = fb.rows_rec[1]
-
-        i_f = div(idx-1, nlat_f) + 1
-        j_f = mod(idx-1, nlat_f) + 1
-
-        # corresponding coarse coordinate
-        i_c = cld(i_f, scale_lon)
-        j_c = cld(j_f, scale_lat)
-
-        # determine which coarse block contains this coordinate
+        # parent coarse block: the one that contains the coarse cell
+        # corresponding to the fine block's first recurrent pixel
+        first_coarse_idx = fine_to_coarse_idx(fb.rows_rec[1])
         parent_block_id = nothing
-
         for (b, cb) in enumerate(coarse_blocks)
-            if linear_index(i_c, j_c, nlat_c) in cb.rows_rec
+            if first_coarse_idx in cb.rows_rec
                 parent_block_id = b
                 break
             end
         end
-
         @assert parent_block_id !== nothing
 
-        # entire parent coarse block becomes rows_layer
+        parent_rec = coarse_blocks[parent_block_id].rows_rec
+
+        if overlap_mode === :exclude
+            # Coarse cells that the fine block "shadows" (its rows_rec
+            # mapped down to the coarse grid). Subtract from parent_rec.
+            shadow = unique(fine_to_coarse_idx.(fb.rows_rec))
+            rows_layer = collect(setdiff(parent_rec, shadow))
+        else  # :include
+            rows_layer = parent_rec
+        end
+
         fine_blocks[k] = (
             rows_rec   = fb.rows_rec,
             rows_neigh = fb.rows_neigh,
-            rows_layer = coarse_blocks[parent_block_id].rows_rec
+            rows_layer = rows_layer
         )
     end
 end
 
 """
-    make_blocks_multi_layer_2d(data_vec, grids, mixing)
+    make_blocks_multi_layer_2d(data_vec, grids, mixing; overlap_mode=:exclude)
 
 Build multi-layer 2D blocks. `data_vec` and `grids` have one entry per layer.
 Each layer is built with `make_blocks_single_layer_2d`; then `add_cross_layer!` fills
 `rows_layer` from the coarser layer. Returns a vector of block vectors (one per layer).
+
+`overlap_mode` is forwarded to `add_cross_layer!`. Default `:exclude` matches
+arXiv:2510.11209.
 """
 function make_blocks_multi_layer_2d(
     data_vec::Vector{<:AbstractArray{Float64,3}},
     grids::Vector{Tuple{Int,Int}},
-    mixing::Int
+    mixing::Int;
+    overlap_mode::Symbol = :exclude
 )
 
     @assert length(data_vec) == length(grids)
@@ -294,7 +319,8 @@ function make_blocks_multi_layer_2d(
             layers[l],
             layers[l-1],
             size(data_vec[l],1), size(data_vec[l],2),
-            size(data_vec[l-1],1), size(data_vec[l-1],2)
+            size(data_vec[l-1],1), size(data_vec[l-1],2);
+            overlap_mode = overlap_mode
         )
     end
 
@@ -306,4 +332,4 @@ end
 
 Multi-layer 2D block construction. Dispatches to `make_blocks_multi_layer_2d`.
 """
-make_blocks(data_vec::Vector{Array{Float64,3}}, grids::Vector{Tuple{Int,Int}}, mixing::Int) = make_blocks_multi_layer_2d(data_vec, grids, mixing)
+make_blocks(data_vec::Vector{Array{Float64,3}}, grids::Vector{Tuple{Int,Int}}, mixing::Int; overlap_mode::Symbol=:exclude) = make_blocks_multi_layer_2d(data_vec, grids, mixing; overlap_mode=overlap_mode)

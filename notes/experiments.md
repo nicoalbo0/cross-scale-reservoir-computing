@@ -38,30 +38,30 @@ std_ratio. ACC alone hides the damped-prediction failure mode.
 
 ---
 
-## Settled defaults (state of the art for monthly 3L pixel) — UPDATED E12
+## Settled defaults (state of the art for monthly 3L pixel) — UPDATED E14
 
-After the E12 early-lead sweep, the best 3L configuration is:
+**Two configurations of interest:**
 
+**(1) Paper-faithful (new code default after E14)** — matches arXiv:2510.11209
+verbatim: linear readout, N=1250, EXCLUDE overlap, aligned grids.
+- 12-mo ACC=0.859, RMSE=0.521, pc=0.086, std_ratio=0.90
+- Per-pixel field RMSE (paper Eq. 4): 0.963
+
+**(2) E12 champion (better on our metrics)** — quadratic readout, N=500,
+INCLUDE overlap, original grids, with E11+E12 hyperparameter tuning.
+- 12-mo ACC=0.847, **RMSE=0.406, pc=0.449**, std_ratio=1.15
+- Per-pixel field RMSE: **0.851** (better than paper-faithful at all leads up to 24mo)
+
+Champion config wins on every metric except basin-mean phase coherence and
+very-long-lead per-pixel RMSE (>36mo). To run E12 champion:
 ```
-mode = three_layer
-τ_coarse=15, τ_mid=10, τ_fine=2                    ← τ_fine: was 3
-ridge_coarse=1e-3, ridge_mid=1e-2, ridge_fine=3.0
-g_layer_A_exp=-0.5, g_layer_B_exp=-1.0
-N_coarse=N_mid=N_fine=500
-rad_coarse=0.85, rad_mid=0.75, rad_fine=0.55
-grids: (3,1) → (9,3) → (9,4)
-mixing=2
-regression=quadratic
-warmup=12
+ENSO_REGRESSION=quadratic ENSO_OVERLAP_MODE=include \
+  ENSO_N_COARSE=500 ENSO_N_MID=500 ENSO_N_FINE=500 \
+  ENSO_GRID_2LAT=4 \
+  ENSO_TAU_COARSE=15 ENSO_GLAYER_A_EXP=-0.5 \
+  ENSO_RIDGE_FINE=3.0 ENSO_TAU_FINE=2 \
+  julia --threads 4 --project=. main_enso_monthly.jl
 ```
-
-→ **12-mo Niño 3.4 ACC = 0.847** (was 0.836 at gAm0p5_rF3; baseline 0.828)
-→ **12-mo Niño 3.4 RMSE = 0.406** (was 0.455; baseline 0.480 — 15.4% lower)
-→ **12-mo spatial pc = 0.449** (was 0.450 — essentially equal; baseline 0.415)
-→ **std_ratio = 1.15** (close to perfect 1.0)
-
-Run as:
-`ENSO_TAU_COARSE=15 ENSO_GLAYER_A_EXP=-0.5 ENSO_RIDGE_FINE=3.0 ENSO_TAU_FINE=2`
 
 **Hyperparameter sensitivity ranking (high → low):**
 1. τ_fine — sharp sweet spot at 3; 10+ collapses model.
@@ -80,6 +80,46 @@ architecture. Going beyond requires structural change — see project memory
 `project_temporal_multiscale_idea.md`.
 
 ---
+
+## E14 — Paper-faithful 3L config (2026-04-28)
+**Question:** apply every recommendation from arXiv:2510.11209 verbatim:
+linear readout ψ(r)=r, N=1250, EXCLUDE cross-scale overlap, aligned grids.
+Compare to E12 champion which used quadratic readout, N=500, INCLUDE overlap,
+non-aligned grids.
+**Code changes:**
+- `src/data/grids.jl`: `add_cross_layer!` and `make_blocks_multi_layer_2d`
+  now accept `overlap_mode` (default `:exclude`, paper-faithful). 2D version
+  had hard-coded INCLUDE before; 1D already supported both.
+- `main_enso_monthly.jl`: added env vars `ENSO_REGRESSION` (default linear),
+  `ENSO_OVERLAP_MODE` (default exclude), `ENSO_N_*` defaults bumped to 1250.
+- For `:exclude` to give consistent layer_dim across blocks, fine grid must
+  align with coarse grid (each fine block ⊆ exactly one coarse block). For
+  our domain that requires `ENSO_GRID_2LAT=9` (was 4).
+**Setup:** 3L tauC15+gAm0p5+rF3+tauF2 hyperparameters (E12), with paper-
+faithful regression/overlap/N. 8 seeds.
+**Outcome (paper-faithful vs E12 champion, 12-mo):**
+
+| Metric           | Paper-faithful | E12 champion | winner |
+|---|---|---|---|
+| Niño 3.4 ACC     | 0.859 | 0.847 | paper +0.012 |
+| Niño 3.4 RMSE    | 0.521 | 0.406 | champion −22% |
+| std_ratio        | 0.90  | 1.15  | paper closer to 1 |
+| spatial pc       | 0.086 | 0.449 | champion 5× |
+| per-pixel RMSE   | 0.963 | 0.851 | champion −12% |
+
+**Interpretation:** the paper's recipe is architecturally clean but loses on
+every meaningful metric except basin-mean phase coherence. Even on the
+paper's own headline metric (per-pixel RMSE Eq. 4), the E12 champion wins
+through ~24 mo lead. The paper's setup was tuned for global SST at weekly
+cadence; the "increasingly linear" finding holds at 18° because global
+averaging smooths to near-linear regime. In our tropical-only monthly
+setup, quadratic readout + smaller reservoirs + INCLUDE overlap reach a
+different (better) local optimum.
+
+**Code now SUPPORTS paper-faithful via env vars; new default is paper-
+faithful** (so running fresh reproduces the paper). Champion config requires
+explicit overrides (see "Settled defaults" block at top of this file).
+**Output:** `results/tune_3L/paperfaithful_8seed/`.
 
 ## E13 — Temporal cross-scale RC on Niño 3.4 (Stage A: 1D scalar) (2026-04-27)
 **Question:** does temporal-band decomposition + cross-scale wiring on the

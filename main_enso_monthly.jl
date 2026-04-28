@@ -142,8 +142,13 @@ grids_AB = [(g18_lon, g18_lat), (g6_lon, g6_lat)]
 grids_BC = [(g6_lon, g6_lat),   (g2_lon, g2_lat)]
 mixing = 2
 
-blocks_AB = make_blocks(data_vec[1:2], grids_AB, mixing)
-blocks_BC = make_blocks(data_vec[2:3], grids_BC, mixing)
+# Cross-scale overlap mode: :exclude (paper-faithful, drops the coarse cells
+# that coincide with the fine block's own region from rows_layer) or :include
+# (entire parent block, our pre-paper default).
+overlap_mode = Symbol(get(ENV, "ENSO_OVERLAP_MODE", "exclude"))
+
+blocks_AB = make_blocks(data_vec[1:2], grids_AB, mixing; overlap_mode=overlap_mode)
+blocks_BC = make_blocks(data_vec[2:3], grids_BC, mixing; overlap_mode=overlap_mode)
 
 blocks_vc   = blocks_AB[1]
 blocks_m_AB = blocks_AB[2]
@@ -173,9 +178,9 @@ ridge_fine   = parse(Float64, get(ENV, "ENSO_RIDGE_FINE",   "1.0"))
 glayer_A_exp = parse(Float64, get(ENV, "ENSO_GLAYER_A_EXP", "-1.0"))
 glayer_B_exp = parse(Float64, get(ENV, "ENSO_GLAYER_B_EXP", "-1.0"))
 
-N_coarse  = parse(Int,     get(ENV, "ENSO_N_COARSE",   "500"))
-N_mid     = parse(Int,     get(ENV, "ENSO_N_MID",      "500"))
-N_fine    = parse(Int,     get(ENV, "ENSO_N_FINE",     "500"))
+N_coarse  = parse(Int,     get(ENV, "ENSO_N_COARSE",   "1250"))
+N_mid     = parse(Int,     get(ENV, "ENSO_N_MID",      "1250"))
+N_fine    = parse(Int,     get(ENV, "ENSO_N_FINE",     "1250"))
 rad_coarse = parse(Float64, get(ENV, "ENSO_RAD_COARSE", "0.85"))
 rad_mid    = parse(Float64, get(ENV, "ENSO_RAD_MID",    "0.75"))
 rad_fine   = parse(Float64, get(ENV, "ENSO_RAD_FINE",   "0.55"))
@@ -202,6 +207,13 @@ ridge_B    = [ridge_mid, ridge_fine]
 dt_B       = [dt,    dt]
 params_B   = (res_size_B, res_rad_B, degree_B, g_rec_B, g_neigh_B, g_layer_B, τ_B, dt_B)
 
+# Readout nonlinearity. Paper (arXiv:2510.11209) uses ψ(r)=r (linear).
+# `ENSO_REGRESSION` ∈ {linear, quadratic}; default linear (paper-faithful).
+regression_sym = Symbol(get(ENV, "ENSO_REGRESSION", "linear"))
+@assert regression_sym in (:linear, :quadratic)
+regression_AB = [regression_sym, regression_sym]
+regression_BC = [regression_sym, regression_sym]
+
 # ---------------------------------------------------------------------------
 # 5. Run pipeline (3-layer by default, same chaining as main_enso.jl)
 # ---------------------------------------------------------------------------
@@ -215,7 +227,7 @@ if mode == :three_layer
             washout = washout, warmup = warmup,
             ridge_parameter = ridge_A,
             show_progress = true, input_mode = :random,
-            regression_mode = [:quadratic, :quadratic])
+            regression_mode = regression_AB)
     coarse_for_B = hcat(train_pred_m, preds_m[:, warmup+1:end])
 end
 
@@ -229,7 +241,7 @@ if mode in (:three_layer, :two_layer)
             washout = washout, warmup = warmup,
             ridge_parameter = ridge_B,
             show_progress = true, input_mode = :random,
-            regression_mode = [:quadratic, :quadratic])
+            regression_mode = regression_BC)
 elseif mode == :single_layer
     println("\n--- Single layer 2° ---")
     blocks_f_solo = make_blocks([fine], [(9, 4)], mixing)[1]
@@ -241,7 +253,7 @@ elseif mode == :single_layer
         washout = washout, warmup = warmup,
         ridge_parameter = ridge_B[2],
         show_progress = true, input_mode = :random,
-        regression_mode = :quadratic)
+        regression_mode = regression_sym)
 end
 
 # ---------------------------------------------------------------------------
