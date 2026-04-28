@@ -32,6 +32,7 @@ using ReservoirComputing
 using JLD2
 using NCDatasets
 using Dates
+using DSP
 
 export load_data
 export make_blocks
@@ -53,11 +54,14 @@ export grid_search
 export nino34_index
 export skill_score
 export sst_grid_coords
+export bandpass_decompose
+export reconstruct_bands
 
 include("types.jl")
 include("data/loading.jl")
 include("data/regrid.jl")
 include("data/grids.jl")
+include("data/temporal_decomposition.jl")
 include("utils/generic.jl")
 include("utils/deeprc_utils.jl")
 include("utils/ngrc_utils.jl")

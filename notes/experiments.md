@@ -81,6 +81,69 @@ architecture. Going beyond requires structural change — see project memory
 
 ---
 
+## E13 — Temporal cross-scale RC on Niño 3.4 (Stage A: 1D scalar) (2026-04-27)
+**Question:** does temporal-band decomposition + cross-scale wiring on the
+1D Niño 3.4 series outperform a single un-decomposed 1D reservoir? Tests
+the architectural prior cleanly without spatial confound. Plan: Stage A (1D)
+→ Stage B (per-pixel SST) → Stage C (dyadic 7-band scalar) → Stage D
+(dyadic per-pixel).
+
+### A.0 — Bandpass utility + unit tests
+**Setup:** New `src/data/temporal_decomposition.jl` using DSP.jl Butterworth
++ filtfilt. **Critical design decision:** bands constructed via cumulative
+lowpass differences (slow=LP(f1), mid=LP(f2)-LP(f1), fast=signal-LP(f2)),
+which gives EXACT reconstruction `signal == sum(bands)` (linearity of
+filtfilt). The textbook LP+BP+HP design does NOT reconstruct exactly because
+Butterworth's gentle rolloff at cutoffs leaves a residual.
+**Outcome:** 24/24 unit tests pass — reconstruction <1e-6, energy isolation
+>95%, zero phase ±1 sample. Filter is solid.
+
+### A.1 — Canary: un-decomposed 1D reservoir (mode=single_reservoir)
+**Question:** baseline ACC for a 1D reservoir on the scalar N3.4 series.
+**Setup:** After E5 leaky regime (ρ=0.55, ridge=1.0) collapsed std_ratio to
+0.04, switched to classic 1D ESN regime: N=1000, ρ=0.95, τ=1 (no leak),
+ridge=1e-7. 4 seeds {1,7,42,99}.
+**Outcome:**
+- 12-mo cum ACC = 0.45 ± 0.30 across seeds (highly seed-variant).
+- Persistent NEGATIVE 3-mo ACC (~−0.5) across all seeds — closed-loop
+  transient artifact (autonomous attractor takes ~6 months to lock onto
+  the trained dynamics).
+- Long-lead diverges; std_ratio explodes (up to 11×) at 18+ months.
+- Below E5 spatial 1L (0.891 ACC) — expected, since the spatial reservoir
+  has 2880 dim/timestep vs our 1 dim per timestep.
+- Establishes canary baseline for A.2/A.3/A.4 to beat.
+
+### A.2 — Per-band INDEPENDENT reservoirs (mode=no_xscale)
+**Question:** does decomposition alone (without cross-scale) help?
+**Setup:** Cutoffs (1/24, 1/3) cyc/mo, Butterworth order 4. Slow τ=30 ρ=0.85
+ridge=1e-3, mid τ=8 ρ=0.75 ridge=1e-2, fast τ=2 ρ=0.55 ridge=1.0; all N=500.
+4 seeds.
+**Outcome:**
+- **12-mo cum ACC = 0.853 ± 0.002** — essentially zero seed variance,
+  hallmark of a converged closed-loop attractor. Beats canary (0.45).
+- 6-mo: 0.824, 9-mo: 0.852, 12-mo: 0.853, 18-mo: 0.84, 24-mo: 0.55.
+- **std_ratio = 0.36 at 12-mo** ⚠ — amplitude collapsed by ~3×, the same
+  failure mode as E5's 1L τ=30 (per memory `feedback_acc_vs_rmse.md`).
+  Phase-correct but under-magnitude: would underestimate El Niño strengths.
+- Per-band own-skill (full 96-mo window): mid ACC=0.53, slow ACC≈0, fast
+  ACC≈0.09. **The MID reservoir carries the prediction**, NOT the slow band.
+- Variance fractions: slow=74%, mid=18%, fast=0.3% of total Niño 3.4 variance.
+  But over short test windows the slow band is approximately constant (its
+  period exceeds the window), so MID dominates the predictability there.
+- Long-window full ACC negative because slow's bad prediction tanks 24+ mo.
+**Lessons:**
+- Decomposition is doing real work — splitting the problem into easier
+  sub-problems (smooth slow, oscillating mid, noise fast) and the mid band
+  is genuinely predictable.
+- The slow reservoir is poorly tuned for narrow-band slow signals; needs
+  separate optimization (try canary regime ρ=0.95, τ=1 for slow band too?).
+- Amplitude-collapse is a structural feature of summing damped predictions.
+
+**Output:** `results/temporal_multiscale/{single_reservoir,no_xscale}/`
+
+### A.3 — Two-band cross-scale (slow → mid)  [pending]
+### A.4 — Full 3-band cascade (slow → mid → fast)  [pending]
+
 ## E12 — 3L early-lead optimization sweep (2026-04-28)
 **Question:** the user observed in the n34_champion plot that the gAm0p5_rF3
 forecast was visually "stretched right" (phase lag ≈ 4 months) and the post-
