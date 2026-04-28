@@ -55,6 +55,7 @@ export nino34_index
 export skill_score
 export sst_grid_coords
 export bandpass_decompose
+export bandpass_decompose_field
 export reconstruct_bands
 
 include("types.jl")

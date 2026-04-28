@@ -198,6 +198,142 @@ if mode == :single_reservoir
     )
     # preds shape: (1, warmup + predict_len). Drop warmup window.
     n34_pred = vec(preds[1, warmup+1:end])
+elseif mode == :full_cascade
+    # A.4: full slow → mid → fast cascade. Two run_multi_layer calls chained
+    # exactly like main_enso_monthly.jl:178–214 (spatial 18°→6°→2°), but
+    # along the temporal frequency axis instead of the spatial one.
+    println("\n--- :full_cascade — slow → mid → fast cross-scale chain ---")
+    bands = bandpass_decompose(n34, cutoffs; fs = 1.0, order = 4)
+    bands_used = bands
+
+    slow_mat = reshape(Float64.(bands.slow), 1, Ttot)
+    mid_mat  = reshape(Float64.(bands.mid),  1, Ttot)
+    fast_mat = reshape(Float64.(bands.fast), 1, Ttot)
+
+    blocks_coarse_xs = make_blocks(1, 1, 0)
+    blocks_fine_xs   = make_blocks(1, 1, 1, 0, 1; overlap_mode = :include)
+
+    # Call A: slow → mid
+    g_rec_A   = [10^(-0.5)/√1.0, 10^(-0.5)/√1.0]
+    g_neigh_A = [0.0, 0.0]
+    g_layer_A = [0.0, 10^glayer_mid_exp / √1.0]
+    params_A_temp = ([N_slow, N_mid], [ρ_slow, ρ_mid], [10, 10],
+                     g_rec_A, g_neigh_A, g_layer_A,
+                     [τ_slow, τ_mid], [dt, dt])
+
+    println("  Call A: slow → mid (g_layer_mid = 10^$(glayer_mid_exp)) ...")
+    preds_mid_A, preds_slow_A, train_pred_mid_A, train_pred_slow_A,
+        _, _, _, _, _ = run_multi_layer(
+            params_A_temp, mid_mat, slow_mat, train_len, predict_len,
+            [blocks_coarse_xs, blocks_fine_xs];
+            washout = washout, warmup = warmup,
+            ridge_parameter = [ridge_slow, ridge_mid],
+            show_progress = true, input_mode = :random,
+            regression_mode = [:quadratic, :quadratic])
+    pred_slow = vec(preds_slow_A[1, warmup+1:end])
+
+    # Build cross-scale input for Call B: combine train_pred_mid (the
+    # teacher-forced training prediction) with the autonomous mid predictions
+    # past warmup (mirrors main_enso_monthly.jl:188).
+    coarse_for_B = hcat(train_pred_mid_A, preds_mid_A[:, warmup+1:end])
+
+    # Call B: mid → fast
+    g_rec_B   = [10^(-0.5)/√1.0, 10^(-0.5)/√1.0]
+    g_neigh_B = [0.0, 0.0]
+    g_layer_B = [0.0, 10^glayer_fast_exp / √1.0]
+    params_B_temp = ([N_mid, N_fast], [ρ_mid, ρ_fast], [10, 10],
+                     g_rec_B, g_neigh_B, g_layer_B,
+                     [τ_mid, τ_fast], [dt, dt])
+
+    println("  Call B: mid → fast (g_layer_fast = 10^$(glayer_fast_exp)) ...")
+    preds_fast_B, preds_mid_B, _, _, _, _, _, _, _ = run_multi_layer(
+        params_B_temp, fast_mat, coarse_for_B, train_len, predict_len,
+        [blocks_coarse_xs, blocks_fine_xs];
+        washout = washout, warmup = warmup,
+        ridge_parameter = [ridge_mid, ridge_fast],
+        show_progress = true, input_mode = :random,
+        regression_mode = [:quadratic, :quadratic])
+    pred_mid  = vec(preds_mid_B[1,  warmup+1:end])
+    pred_fast = vec(preds_fast_B[1, warmup+1:end])
+
+    n34_pred = pred_slow .+ pred_mid .+ pred_fast
+    preds_per_band = Dict(:slow => pred_slow, :mid => pred_mid, :fast => pred_fast)
+
+    t_truth = (train_len + 1) : (train_len + length(n34_pred))
+    println("  Per-band own-skill (full test window):")
+    for (b, p) in preds_per_band
+        truth_band = bands[b][t_truth]
+        s = skill_score(truth_band, p)
+        sr = std(p) / std(truth_band)
+        println("    $(rpad(string(b),5)) ACC=$(round(s.acc;digits=3))   RMSE=$(round(s.rmse;digits=4))   std_ratio=$(round(sr;digits=3))")
+    end
+
+elseif mode == :two_band_cascade
+    # A.3 ablation: slow → mid via run_multi_layer; fast trained independently
+    # as in A.2. Tests whether slow-band cross-scale wiring lifts mid-band
+    # prediction, the recharge-oscillator analog ("slow heat content drives
+    # fast SST response").
+    println("\n--- :two_band_cascade — slow → mid via run_multi_layer; fast independent ---")
+    bands = bandpass_decompose(n34, cutoffs; fs = 1.0, order = 4)
+    bands_used = bands
+
+    slow_mat = reshape(Float64.(bands.slow), 1, Ttot)
+    mid_mat  = reshape(Float64.(bands.mid),  1, Ttot)
+    fast_mat = reshape(Float64.(bands.fast), 1, Ttot)
+
+    # Trivial 1D blocks: coarse is single-layer block (no incoming xscale);
+    # fine is multi-layer block with rows_layer=[1] (cross-scale to coarse).
+    blocks_coarse_xs = make_blocks(1, 1, 0)
+    blocks_fine_xs   = make_blocks(1, 1, 1, 0, 1; overlap_mode = :include)
+    @assert input_dimensions(blocks_coarse_xs) == (1, 0, 0)
+    @assert input_dimensions(blocks_fine_xs)   == (1, 0, 1)
+
+    # Per-layer hyperparameters (length-2 vectors: [slow, mid]).
+    g_rec_AB   = [10^(-0.5)/√1.0, 10^(-0.5)/√1.0]
+    g_neigh_AB = [0.0, 0.0]
+    g_layer_AB = [0.0, 10^glayer_mid_exp / √1.0]
+    params_AB  = ([N_slow, N_mid], [ρ_slow, ρ_mid], [10, 10],
+                  g_rec_AB, g_neigh_AB, g_layer_AB,
+                  [τ_slow, τ_mid], [dt, dt])
+
+    println("  slow→mid wiring: g_layer (mid) = 10^$(glayer_mid_exp) / √1 = $(round(g_layer_AB[2];digits=4))")
+    println("  Call A: slow → mid (run_multi_layer) ...")
+    preds_mid, preds_slow, _, _, _, _, _, _, _ = run_multi_layer(
+        params_AB, mid_mat, slow_mat, train_len, predict_len,
+        [blocks_coarse_xs, blocks_fine_xs];
+        washout = washout, warmup = warmup,
+        ridge_parameter = [ridge_slow, ridge_mid],
+        show_progress = true, input_mode = :random,
+        regression_mode = [:quadratic, :quadratic],
+    )
+    pred_slow = vec(preds_slow[1, warmup+1:end])
+    pred_mid  = vec(preds_mid[1,  warmup+1:end])
+
+    # Fast band: independent run_single_layer (same as A.2).
+    println("  Fast band: independent reservoir ...")
+    params_fast = (N_fast, ρ_fast, 10, 10^(-0.5)/√1.0, 0.0, 0.0, τ_fast, dt)
+    preds_fast_mat, _, _, _, _ = run_single_layer(
+        params_fast, fast_mat, zero_layer, train_len, predict_len, blocks_solo;
+        washout = washout, warmup = warmup,
+        ridge_parameter = ridge_fast,
+        show_progress = false, input_mode = :random,
+        regression_mode = :quadratic,
+    )
+    pred_fast = vec(preds_fast_mat[1, warmup+1:end])
+
+    n34_pred = pred_slow .+ pred_mid .+ pred_fast
+    preds_per_band = Dict(:slow => pred_slow, :mid => pred_mid, :fast => pred_fast)
+
+    # Per-band own-skill (compare predicted band to truth band over test window)
+    t_truth = (train_len + 1) : (train_len + length(n34_pred))
+    println("  Per-band own-skill (full test window):")
+    for (b, p) in preds_per_band
+        truth_band = bands[b][t_truth]
+        s = skill_score(truth_band, p)
+        sr = std(p) / std(truth_band)
+        println("    $(rpad(string(b),5)) ACC=$(round(s.acc;digits=3))   RMSE=$(round(s.rmse;digits=4))   std_ratio=$(round(sr;digits=3))")
+    end
+
 elseif mode == :no_xscale
     # A.2 ablation: decompose Niño 3.4 into 3 bands; train ONE reservoir per band
     # independently (no cross-scale wiring); reconstruct n34_pred = Σ band preds.

@@ -141,8 +141,115 @@ ridge=1e-3, mid τ=8 ρ=0.75 ridge=1e-2, fast τ=2 ρ=0.55 ridge=1.0; all N=500.
 
 **Output:** `results/temporal_multiscale/{single_reservoir,no_xscale}/`
 
-### A.3 — Two-band cross-scale (slow → mid)  [pending]
-### A.4 — Full 3-band cascade (slow → mid → fast)  [pending]
+### A.3 — Two-band cross-scale (slow → mid)  (mode=two_band_cascade)
+**Question:** does slow→mid cross-scale wiring lift mid-band prediction
+(recharge oscillator analog: slow heat content drives fast SST response)?
+**Setup:** Same per-band hyperparameters as A.2. Slow→mid wiring via
+`run_multi_layer` with `make_blocks(1,1,1,0,1; overlap_mode=:include)` for
+the fine block (yields layer_dim=1) and `make_blocks(1,1,0)` for the coarse.
+g_layer_mid coupling tested at exp ∈ {-3.0, -2.0, -1.5, -1.0, -0.5}. 4 seeds.
+**Outcome (NEGATIVE result):**
+- 12-mo cum ACC = 0.829 ± 0.003 across seeds — **WORSE than A.2** (0.853).
+- Mid own-skill DROPS from 0.55 (A.2) to 0.25 (A.3) — slow's noise-grade
+  prediction (own-ACC=0.046) poisons mid via the cross-scale input.
+- Coupling sweep: weakest coupling (10^-3) ≈ no coupling (matches A.2);
+  stronger coupling progressively hurts. No regime helps.
+- Cross-scale wiring is decorative/harmful here because slow band is
+  unpredictable from itself in the 1D scalar setting.
+
+### A.4 — Full 3-band cascade (slow → mid → fast)  (mode=full_cascade)
+**Question:** does the full chained cascade beat A.2's no-wiring baseline?
+**Setup:** Two `run_multi_layer` calls chained as in `main_enso_monthly.jl:178–214`.
+Call A: slow → mid. Call B: mid (autonomous) → fast. Coarse_for_B builds
+from train_pred_mid + autonomous mid past warmup. 4 seeds.
+**Outcome (NEGATIVE result, worse than A.3):**
+- 12-mo cum ACC = 0.570 ± 0.015 — substantial regression from A.2 (0.853).
+- 18-mo: 0.45, 24-mo collapses.
+- Each level of cross-scale wiring further damps prediction amplitude:
+  std_ratio at 12mo drops to 0.13 (vs A.2's 0.36, A.3's 0.36).
+- Mid own-skill in Call B is ~0.46 (between A.3's 0.25 and A.2's 0.55), but
+  more amplitude-collapsed.
+
+### Stage A conclusion
+**Decomposition alone is the win on 1D scalar.** The cross-scale architecture
+fails on this 1D problem because:
+1. Slow band reservoir can't predict its own band from a single scalar input
+   (no internal degrees of freedom to model the slow oscillator dynamics).
+2. Feeding noise-grade slow predictions into mid via cross-scale degrades
+   mid's prediction monotonically with coupling strength.
+3. Adding mid→fast on top compounds the damage.
+
+**For Stage B (per-pixel):** the slow band has *spatial* structure (each
+pixel's slow component); the slow reservoir gets ~80 pixels of input per
+timestep, much richer state to learn from. This is the test that matters —
+whether cross-scale wiring CAN help when the slow reservoir has enough
+information to predict its band properly.
+
+**For potential rescue of Stage A** (skipping for now): improve slow
+reservoir via time-delay embedding, or use AR(1)/persistence as the slow
+"prediction" (since the slow band is smooth, persistence is informative).
+Reserved as fallback; pursued only if Stage B also fails.
+
+### Stage B — Per-pixel temporal cross-scale on full SST field (2026-04-27)
+**Question:** does per-pixel band decomposition + spatial reservoir per band
+beat the spatial 1L (E5: 0.891 ACC, std_ratio=0.18 ⚠) and the spatial 3L
+(E12 best: 0.847 ACC, RMSE 0.41, pc 0.45) on (a) Niño 3.4 skill, (b) spatial
+pattern fidelity?
+**Setup:** New `main_enso_temporal_multiscale_field.jl`. Each pixel's
+monthly time series bandpass-decomposed (Butterworth order 4, filtfilt,
+cutoffs 1/24, 1/3 cyc/mo) into slow/mid/fast cubes. Each band uses a
+single-layer 2° spatial pipeline (36 spatial blocks, 9×4 grid, mixing=2,
+N=500). Final SST forecast = sum of band-wise predicted fields.
+4 seeds {1,7,42,99}.
+
+**B.no_xscale_field — three independent spatial pipelines:**
+- Hyperparameters per band: τ_slow=30, τ_mid=8, τ_fast=2; ρ=0.55 ridge=1.0
+  for ALL bands (E5-style stable config; original ρ=0.85 ridge=1e-3 for
+  slow/mid caused per-pixel closed-loop divergence in field mode).
+- **12-mo cum ACC = 0.890 ± 0.001** — matches E5 (0.891) and E12 (0.847)
+  on the headline metric, with near-zero seed variance.
+- **12-mo RMSE = 0.40** — better than E5's 0.61, equal to E12's 0.41.
+- **12-mo std_ratio = 0.54** — 3× better than E5's 0.18, but still
+  amplitude-collapsed; E12 (1.15) is the leader on amplitude.
+- **3-mo spatial pc = 0.56 ± 0.01** — **best 3-month spatial forecast
+  measured to date** (E5 ~0.11, E12 ~0.45 typical at 3 mo).
+- 12-mo spatial pc = 0.22 — between E5 (0.11) and E12 (0.45). Per-pixel
+  decomposition doesn't preserve spatial coherence as long-lead as the
+  spatial 3L cross-scale.
+- Per-band own-skill (across pixels × time): all near zero (0.10-0.14).
+  The per-band reservoirs aren't "predicting" their band per se — they're
+  trained to fit the band's local dynamics, and the SUM happens to
+  reconstruct N3.4 well at short-mid leads.
+
+**B.full_cascade_field — slow→mid→fast cross-scale at same spatial blocks:**
+- Same hyperparameters. blocks_band_coarse and blocks_band_fine constructed
+  via `make_blocks_multi_layer_2d` with same grid (9,4) for both, divisor=1.
+- Result: TIES no_xscale_field at 12-mo (ACC 0.890, identical pc 0.20).
+- WORSE at long leads (18 mo ACC: 0.62 vs 0.73 in no_xscale_field).
+- More amplitude collapse (std_ratio 0.40 vs 0.54).
+- **Cross-scale wiring is neutral-to-negative in Stage B too** — same
+  conclusion as Stage A.
+
+### Stages A + B conclusion
+- **The decomposition prior is genuinely useful at short-mid leads** —
+  Stage B no_xscale_field gives the best 3-month spatial forecast we've
+  ever measured (pc=0.56) and matches the best Niño 3.4 ACC (0.890) with
+  intermediate amplitude fidelity.
+- **Cross-scale wiring (slow→mid→fast) does NOT add value** at either
+  the 1D scalar (Stage A) or per-pixel (Stage B) level. The recharge-
+  oscillator architectural prior fails empirically: the slow reservoir
+  cannot predict the slow band well enough for its prediction to be
+  useful as cross-scale input to mid/fast.
+- **At long leads (>18 mo)**, the spatial 3L cross-scale (E12) still
+  dominates on spatial pc (0.45 vs 0.22). Different architectures
+  optimize for different regimes.
+- **Open question (pursued in C, D):** does dyadic sub-banding (1+2+4
+  bands instead of 1+1+1) help, particularly at long leads? Stage A's
+  flat-band finding suggests sub-banding fast is unlikely to help; sub-
+  banding mid might.
+
+**Outputs:** `results/temporal_multiscale/{no_xscale,no_xscale_field,
+two_band_cascade,full_cascade,full_cascade_field}/`
 
 ## E12 — 3L early-lead optimization sweep (2026-04-28)
 **Question:** the user observed in the n34_champion plot that the gAm0p5_rF3

@@ -98,3 +98,59 @@ function reconstruct_bands(bands::NamedTuple)
         return bands.slow .+ bands.fast
     end
 end
+
+"""
+    bandpass_decompose_field(field, cutoffs; fs=1.0, order=4)
+
+Apply `bandpass_decompose` to each pixel's time series independently for a
+spatiotemporal `field` of shape `(nlon × nlat × nt)`. Returns a `NamedTuple`
+of bands, each the same shape as the input.
+
+This is the field analog used for the per-pixel temporal cross-scale
+architecture. Each pixel's time series is decomposed independently — no
+cross-pixel filter coupling. NaN pixels (land) are replaced by zero before
+filtering; the corresponding band entries are also zero (the filter of a
+zero series is a zero series).
+"""
+function bandpass_decompose_field(field::AbstractArray{<:Real, 3},
+                                  cutoffs::NTuple{N, <:Real};
+                                  fs::Real = 1.0, order::Int = 4) where {N}
+    nlon, nlat, nt = size(field)
+
+    # Allocate output cubes (one per band)
+    n_bands = N == 1 ? 2 : (N == 2 ? 3 : N + 1)
+    out = [Array{Float64, 3}(undef, nlon, nlat, nt) for _ in 1:n_bands]
+
+    @inbounds for i in 1:nlon, j in 1:nlat
+        ts = view(field, i, j, :)
+        # Replace NaN with 0 in a copy (filter requires finite real values).
+        ts_clean = if any(isnan, ts)
+            replace(Float64.(ts), NaN => 0.0)
+        else
+            Float64.(ts)
+        end
+        bands = bandpass_decompose(ts_clean, cutoffs; fs = fs, order = order)
+        if N == 1
+            out[1][i, j, :] .= bands.slow
+            out[2][i, j, :] .= bands.fast
+        elseif N == 2
+            out[1][i, j, :] .= bands.slow
+            out[2][i, j, :] .= bands.mid
+            out[3][i, j, :] .= bands.fast
+        else
+            out[1][i, j, :] .= bands.slow
+            for k in 1:length(bands.mids)
+                out[k+1][i, j, :] .= bands.mids[k]
+            end
+            out[end][i, j, :] .= bands.fast
+        end
+    end
+
+    if N == 1
+        return (slow = out[1], fast = out[2])
+    elseif N == 2
+        return (slow = out[1], mid = out[2], fast = out[3])
+    else
+        return (slow = out[1], mids = out[2:end-1], fast = out[end])
+    end
+end
