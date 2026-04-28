@@ -251,6 +251,89 @@ N=500). Final SST forecast = sum of band-wise predicted fields.
 **Outputs:** `results/temporal_multiscale/{no_xscale,no_xscale_field,
 two_band_cascade,full_cascade,full_cascade_field}/`
 
+### A.5 — Diagnostic: train vs test ACC per band  (mode=single_band_probe)
+**Question:** is the slow band reservoir's failure due to capacity (can't fit
+training) or closed-loop instability (can fit training, autonomous trajectory
+diverges)?
+**Outcome (seed=42, default per-band hyperparameters):**
+
+| Band | Train ACC | Test ACC@12mo | Train std_ratio | Test std_ratio |
+|------|-----------|---------------|-----------------|----------------|
+| slow | **0.946** | **−0.89** | 0.93 | 0.04 |
+| mid  | 0.875 | 0.86 | 0.86 | 0.41 |
+| fast | 0.929 | 0.39 | 0.46 | 0.006 |
+
+**Finding:** slow reservoir CAN fit training nearly perfectly (ACC=0.946,
+correct amplitude). The closed-loop autonomously diverges. Mid is stable.
+Fast collapses (expected — mostly noise). The slow band fails specifically
+because its long-period oscillator's autonomous trajectory accumulates phase
+errors over many timesteps.
+
+### A.6 — Oracle test: TRUE slow band as cross-scale input to mid
+**Question:** if slow's prediction were perfect, would cross-scale wiring
+help mid? Tests whether the wiring MECHANISM works given good coarse input.
+**Setup:** mode=two_band_oracle_slow. Mid trained via `run_single_layer` with
+`data_layer = TRUE slow band` (both training and test). Sweep
+glayer_mid_exp ∈ {-2.0, -1.0, -0.5, 0.0}.
+**Outcome (PROFOUND NEGATIVE for the bandpass cross-scale claim):**
+
+| g_layer_mid_exp | Mid solo ACC | Mid + ORACLE slow ACC | Δ |
+|-----------------|--------------|------------------------|------|
+| -2.0  | 0.526 | 0.476 | **-0.05** |
+| -1.0  | 0.526 | 0.054 | -0.47 |
+| -0.5  | 0.526 | -0.465 | -0.99 |
+| 0.0   | 0.526 | -0.238 | -0.76 |
+
+**Finding:** even with PERFECT slow band as cross-scale input, mid's
+own-skill DROPS at every coupling strength. **Cross-scale wiring of
+bandpass-decomposed bands fundamentally doesn't help.** Reason: the
+bandpass decomposition makes slow and mid bands ORTHOGONAL in frequency
+by construction; mid's target has zero slow-frequency content; slow input
+is noise to the readout.
+
+**Architectural lesson:** the spatial cross-scale (KS paper) works because
+coarse and fine *spatial* layers see related (non-orthogonal) content.
+The temporal analog should NOT decompose into orthogonal bands. **Partition
+by τ, not by frequency.**
+
+### A.7 — Multi-τ cross-scale on the FULL signal (mode=multi_tau_2 / multi_tau_3)
+**Question:** does the cross-scale architecture work when each reservoir
+sees the FULL broadband signal but with different τ (memory timescale)?
+This is the user-suggested correct architecture: partition timescales,
+not frequencies.
+**Setup:** main_enso_temporal_multiscale.jl. All reservoirs fed full
+Niño 3.4. Per-layer τ varies (slow=30, mid=8, fast=2). Cross-scale wired
+slow→mid→fast (multi_tau_3) or slow→fast (multi_tau_2). Final n34
+prediction = fast (deepest) reservoir's autonomous output. 4 seeds.
+
+**Outcome (POSITIVE result, multi-τ ARCHITECTURE WORKS):**
+
+| Architecture | Input | 12-mo ACC | 18-mo ACC | 24-mo ACC | std_ratio@12mo |
+|--------------|-------|-----------|-----------|-----------|----------------|
+| E5 1L spatial | 2916D | 0.891 | 0.46 | 0.43 | 0.18 ⚠ |
+| E12 best 3L | 2916D | 0.847 | 0.49 | 0.45 | 1.15 |
+| B no_xscale_field | 2916D | 0.890 | 0.73 | 0.38 | 0.54 |
+| **multi_tau_2 (1D)** | **1D** | **0.881 ± 0.002** | 0.64 | 0.48 | 0.57 |
+| **multi_tau_3 (1D)** | **1D** | **0.876 ± 0.007** | **0.74** | **0.56** | 0.57 |
+
+- Multi_tau_3 on a single scalar input matches E5/E12 at 12-mo and BEATS
+  ALL spatial baselines at 18-24 month leads.
+- Std_ratio 3× better than E5 (no amplitude collapse).
+- Per-layer autonomous predictions: slow's own-skill is still poor (ACC
+  near 0), but the FAST reservoir (with cross-scale input from slow)
+  achieves the headline result. The wiring is genuinely transferring useful
+  state, even when the slow reservoir's own readout is weak.
+
+**The architectural mechanism:** different τ values give each reservoir
+different "viewing windows" into the same broadband dynamics. Cross-scale
+wiring lets the fast reservoir leverage the slow reservoir's long-memory
+state to stabilise long-lead predictions. Bandpass decomposition destroyed
+this by orthogonalising the bands; broadband multi-τ preserves it.
+
+**Output:** `results/temporal_multiscale/{multi_tau_2,multi_tau_3}/`
+**Next:** D = spatial extension (each spatial block hosts its own multi-τ
+cascade). Genuine "double multi-scale" architecture.
+
 ## E12 — 3L early-lead optimization sweep (2026-04-28)
 **Question:** the user observed in the n34_champion plot that the gAm0p5_rF3
 forecast was visually "stretched right" (phase lag ≈ 4 months) and the post-

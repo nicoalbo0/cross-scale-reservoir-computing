@@ -35,9 +35,12 @@ BLAS.set_num_threads(1)
 
 seed     = parse(Int, get(ENV, "ENSO_SEED", "42"))
 mode     = Symbol(get(ENV, "ENSO_TM_MODE", "single_reservoir"))
-@assert mode in (:single_reservoir, :no_xscale, :two_band_cascade, :full_cascade) (
+@assert mode in (:single_reservoir, :no_xscale, :two_band_cascade, :full_cascade,
+                 :single_band_probe, :two_band_oracle_slow,
+                 :multi_tau_2, :multi_tau_3) (
     "Unknown ENSO_TM_MODE=$(mode); expected one of " *
-    "single_reservoir, no_xscale, two_band_cascade, full_cascade")
+    "single_reservoir, no_xscale, two_band_cascade, full_cascade, " *
+    "single_band_probe, two_band_oracle_slow, multi_tau_2, multi_tau_3")
 
 mode_tag = String(mode)
 seed_tag = "seed$(seed)"
@@ -198,6 +201,243 @@ if mode == :single_reservoir
     )
     # preds shape: (1, warmup + predict_len). Drop warmup window.
     n34_pred = vec(preds[1, warmup+1:end])
+elseif mode == :multi_tau_2
+    # Multi-τ cross-scale on the FULL Niño 3.4 signal (no decomposition).
+    # Two reservoirs at different τ, each fed the broadband n34. The slow
+    # reservoir's prediction feeds the fast reservoir as cross-scale input.
+    # Final n34 forecast = fast reservoir's autonomous prediction.
+    # This is the architecture analog of spatial cross-scale (different
+    # blocks see same content at different resolutions) but along the τ axis.
+    println("\n--- :multi_tau_2 — slow τ=$(τ_slow) → fast τ=$(τ_fast) on full N3.4 ---")
+
+    blocks_coarse_solo = make_blocks(1, 1, 0)
+    blocks_fine_xs    = make_blocks(1, 1, 1, 0, 1; overlap_mode = :include)
+
+    g_rec   = [10^(-0.5)/√1.0, 10^(-0.5)/√1.0]
+    g_neigh = [0.0, 0.0]
+    g_layer = [0.0, 10^glayer_fast_exp / √1.0]
+    params_2 = ([N_slow, N_fast], [ρ_slow, ρ_fast], [10, 10],
+                g_rec, g_neigh, g_layer,
+                [τ_slow, τ_fast], [dt, dt])
+
+    println("  hyperparams: ρ slow/fast=$(ρ_slow)/$(ρ_fast)  ridge slow/fast=$(ridge_slow)/$(ridge_fast)")
+    println("  cross-scale gain (fast layer): 10^$(glayer_fast_exp)")
+
+    preds_fast, preds_slow, _, _, _, _, _, _, _ = run_multi_layer(
+        params_2, n34_mat, n34_mat, train_len, predict_len,
+        [blocks_coarse_solo, blocks_fine_xs];
+        washout = washout, warmup = warmup,
+        ridge_parameter = [ridge_slow, ridge_fast],
+        show_progress = true, input_mode = :random,
+        regression_mode = [:quadratic, :quadratic],
+    )
+    n34_pred = vec(preds_fast[1, warmup+1:end])
+    pred_slow_intermediate = vec(preds_slow[1, warmup+1:end])
+
+    # Diagnostic: how does the slow reservoir's autonomous prediction compare
+    # to the truth? And how does the fast (cross-scale-fed) reservoir compare?
+    t_truth = (train_len + 1) : (train_len + length(n34_pred))
+    truth_full = n34[t_truth]
+    sc_slow_int = skill_score(truth_full, pred_slow_intermediate)
+    sr_slow_int = std(pred_slow_intermediate) / std(truth_full)
+    println("\n  Slow-layer (τ=$(τ_slow)) autonomous prediction of n34:")
+    println("    ACC=$(round(sc_slow_int.acc;digits=3))   std_ratio=$(round(sr_slow_int;digits=3))")
+
+elseif mode == :multi_tau_3
+    # Three reservoirs at different τ, all fed the FULL N3.4 signal.
+    # slow τ → mid τ → fast τ cascade. Final = fast reservoir's prediction.
+    # This mirrors the spatial 3L architecture but along the τ axis instead
+    # of the spatial axis.
+    println("\n--- :multi_tau_3 — slow τ=$(τ_slow) → mid τ=$(τ_mid) → fast τ=$(τ_fast) on full N3.4 ---")
+
+    blocks_coarse_solo = make_blocks(1, 1, 0)
+    blocks_fine_xs    = make_blocks(1, 1, 1, 0, 1; overlap_mode = :include)
+
+    # Call A: slow → mid (both see full n34)
+    g_rec_A   = [10^(-0.5)/√1.0, 10^(-0.5)/√1.0]
+    g_neigh_A = [0.0, 0.0]
+    g_layer_A = [0.0, 10^glayer_mid_exp / √1.0]
+    params_A_3 = ([N_slow, N_mid], [ρ_slow, ρ_mid], [10, 10],
+                  g_rec_A, g_neigh_A, g_layer_A,
+                  [τ_slow, τ_mid], [dt, dt])
+
+    println("  Call A: slow → mid (g_layer_mid=10^$(glayer_mid_exp)) ...")
+    preds_mid_A, preds_slow_A, train_pred_mid_A, train_pred_slow_A,
+        _, _, _, _, _ = run_multi_layer(
+            params_A_3, n34_mat, n34_mat, train_len, predict_len,
+            [blocks_coarse_solo, blocks_fine_xs];
+            washout = washout, warmup = warmup,
+            ridge_parameter = [ridge_slow, ridge_mid],
+            show_progress = true, input_mode = :random,
+            regression_mode = [:quadratic, :quadratic])
+
+    # Call B: mid → fast. Coarse for B is the autonomous mid prediction
+    # chained from Call A (matches main_enso_monthly.jl pattern).
+    coarse_for_B = hcat(train_pred_mid_A, preds_mid_A[:, warmup+1:end])
+
+    g_rec_B   = [10^(-0.5)/√1.0, 10^(-0.5)/√1.0]
+    g_neigh_B = [0.0, 0.0]
+    g_layer_B = [0.0, 10^glayer_fast_exp / √1.0]
+    params_B_3 = ([N_mid, N_fast], [ρ_mid, ρ_fast], [10, 10],
+                  g_rec_B, g_neigh_B, g_layer_B,
+                  [τ_mid, τ_fast], [dt, dt])
+
+    println("  Call B: mid → fast (g_layer_fast=10^$(glayer_fast_exp)) ...")
+    preds_fast_B, preds_mid_B, _, _, _, _, _, _, _ = run_multi_layer(
+        params_B_3, n34_mat, coarse_for_B, train_len, predict_len,
+        [blocks_coarse_solo, blocks_fine_xs];
+        washout = washout, warmup = warmup,
+        ridge_parameter = [ridge_mid, ridge_fast],
+        show_progress = true, input_mode = :random,
+        regression_mode = [:quadratic, :quadratic])
+    n34_pred = vec(preds_fast_B[1, warmup+1:end])
+
+    # Diagnostics: compare each layer's autonomous prediction
+    pred_slow_int = vec(preds_slow_A[1, warmup+1:end])
+    pred_mid_int  = vec(preds_mid_A[1, warmup+1:end])
+    t_truth = (train_len + 1) : (train_len + length(n34_pred))
+    truth_full = n34[t_truth]
+    println("\n  Per-layer autonomous predictions vs full n34:")
+    for (lab, p) in (("slow τ=$(τ_slow)", pred_slow_int),
+                     ("mid τ=$(τ_mid) (Call A)", pred_mid_int),
+                     ("fast τ=$(τ_fast) (Call B, FINAL)", n34_pred))
+        s = skill_score(truth_full, p)
+        sr = std(p) / std(truth_full)
+        println("    $(rpad(lab, 32)) ACC=$(round(s.acc;digits=3))   std_ratio=$(round(sr;digits=3))")
+    end
+
+elseif mode == :single_band_probe
+    # Diagnostic: train ONE reservoir on ONE band and measure both training-
+    # set ACC (teacher forced) and test-set ACC (autonomous closed loop).
+    # If train ACC >> test ACC, the issue is closed-loop instability.
+    # If train ACC ≈ 0 too, the issue is reservoir capacity / hyperparams.
+    # Pick band via ENSO_TM_PROBE_BAND ∈ {slow, mid, fast}.
+    probe_band = Symbol(get(ENV, "ENSO_TM_PROBE_BAND", "slow"))
+    @assert probe_band in (:slow, :mid, :fast)
+    println("\n--- :single_band_probe — train one reservoir on $(probe_band) band ---")
+
+    bands = bandpass_decompose(n34, cutoffs; fs = 1.0, order = 4)
+    bands_used = bands
+    band_signal = getproperty(bands, probe_band)
+    band_mat = reshape(Float64.(band_signal), 1, Ttot)
+
+    τ_p, ρ_p, ridge_p, N_p = if probe_band == :slow
+        (τ_slow, ρ_slow, ridge_slow, N_slow)
+    elseif probe_band == :mid
+        (τ_mid, ρ_mid, ridge_mid, N_mid)
+    else
+        (τ_fast, ρ_fast, ridge_fast, N_fast)
+    end
+    params = (N_p, ρ_p, 10, 10^(-0.5)/√1.0, 0.0, 0.0, τ_p, dt)
+    println("  $(probe_band) hyperparams: τ=$(τ_p)  ρ=$(ρ_p)  ridge=$(ridge_p)  N=$(N_p)")
+
+    preds, train_pred, _, _, _ = run_single_layer(
+        params, band_mat, zero_layer, train_len, predict_len, blocks_solo;
+        washout = washout, warmup = warmup,
+        ridge_parameter = ridge_p,
+        show_progress = true, input_mode = :random,
+        regression_mode = :quadratic,
+    )
+
+    pred_band = vec(preds[1, warmup+1:end])
+    n34_pred = pred_band     # report band-on-band skill, not summed
+    bands_used = bands
+
+    # Training-set ACC (teacher forced): how well does the readout fit the
+    # training band signal? This tells us if it's a capacity issue.
+    train_pred_vec = vec(train_pred[1, washout+1:end])
+    train_truth_vec = band_signal[washout+1:train_len]
+    train_sc = skill_score(train_truth_vec, train_pred_vec)
+    train_sr = std(train_pred_vec) / std(train_truth_vec)
+    println("\n  TRAINING-set skill (teacher forced):")
+    println("    ACC=$(round(train_sc.acc;digits=3))   RMSE=$(round(train_sc.rmse;digits=4))   std_ratio=$(round(train_sr;digits=3))")
+    # We compare the AUTONOMOUS (test) ACC after the regular skill block below.
+
+elseif mode == :two_band_oracle_slow
+    # Diagnostic: train mid reservoir with cross-scale wiring to TRUE slow band
+    # (oracle). Both training and test use the actual slow band (not slow's
+    # autonomous prediction). Tests whether the cross-scale MECHANISM works
+    # given a perfect slow prediction. If mid's skill jumps vs A.2's no_xscale
+    # mid (ACC=0.55), wiring is fine and we need a better slow predictor.
+    # If mid doesn't improve, the wiring itself isn't useful for ENSO.
+    println("\n--- :two_band_oracle_slow — mid reservoir with TRUE slow as cross-scale input ---")
+    bands = bandpass_decompose(n34, cutoffs; fs = 1.0, order = 4)
+    bands_used = bands
+
+    slow_mat = reshape(Float64.(bands.slow), 1, Ttot)
+    mid_mat  = reshape(Float64.(bands.mid),  1, Ttot)
+    fast_mat = reshape(Float64.(bands.fast), 1, Ttot)
+
+    # Mid block with cross-scale layer input (rows_layer=[1]).
+    blocks_fine_xs = make_blocks(1, 1, 1, 0, 1; overlap_mode = :include)
+    @assert input_dimensions(blocks_fine_xs) == (1, 0, 1)
+
+    g_layer_mid = 10^glayer_mid_exp / √1.0
+    params_mid = (N_mid, ρ_mid, 10, 10^(-0.5)/√1.0, 0.0, g_layer_mid, τ_mid, dt)
+    println("  oracle wiring: g_layer (mid) = 10^$(glayer_mid_exp) / √1 = $(round(g_layer_mid;digits=4))")
+
+    # Use single_layer with non-zero data_layer = TRUE slow band.
+    # This means the mid reservoir sees true slow at every timestep, both
+    # during training and during the autonomous mid prediction.
+    preds_mid_oracle, train_pred_mid, _, _, _ = run_single_layer(
+        params_mid, mid_mat, slow_mat, train_len, predict_len, blocks_fine_xs;
+        washout = washout, warmup = warmup,
+        ridge_parameter = ridge_mid,
+        show_progress = true, input_mode = :random,
+        regression_mode = :quadratic,
+    )
+
+    # For comparison: ALSO train a no-xscale mid reservoir with the same seed.
+    println("  also training mid WITHOUT cross-scale (apples-to-apples) ...")
+    params_mid_solo = (N_mid, ρ_mid, 10, 10^(-0.5)/√1.0, 0.0, 0.0, τ_mid, dt)
+    preds_mid_solo, _, _, _, _ = run_single_layer(
+        params_mid_solo, mid_mat, zero_layer, train_len, predict_len, blocks_solo;
+        washout = washout, warmup = warmup,
+        ridge_parameter = ridge_mid,
+        show_progress = false, input_mode = :random,
+        regression_mode = :quadratic,
+    )
+
+    pred_mid_oracle = vec(preds_mid_oracle[1, warmup+1:end])
+    pred_mid_solo   = vec(preds_mid_solo[1,   warmup+1:end])
+
+    # Train slow + fast independently (just for forming the n34 sum)
+    params_slow = (N_slow, ρ_slow, 10, 10^(-0.5)/√1.0, 0.0, 0.0, τ_slow, dt)
+    preds_slow_solo, _, _, _, _ = run_single_layer(
+        params_slow, slow_mat, zero_layer, train_len, predict_len, blocks_solo;
+        washout = washout, warmup = warmup,
+        ridge_parameter = ridge_slow,
+        show_progress = false, input_mode = :random,
+        regression_mode = :quadratic,
+    )
+    params_fast = (N_fast, ρ_fast, 10, 10^(-0.5)/√1.0, 0.0, 0.0, τ_fast, dt)
+    preds_fast_solo, _, _, _, _ = run_single_layer(
+        params_fast, fast_mat, zero_layer, train_len, predict_len, blocks_solo;
+        washout = washout, warmup = warmup,
+        ridge_parameter = ridge_fast,
+        show_progress = false, input_mode = :random,
+        regression_mode = :quadratic,
+    )
+
+    pred_slow = vec(preds_slow_solo[1, warmup+1:end])
+    pred_fast = vec(preds_fast_solo[1, warmup+1:end])
+
+    # Compare: oracle-mid vs solo-mid.
+    t_truth = (train_len + 1) : (train_len + length(pred_mid_oracle))
+    mid_truth = bands.mid[t_truth]
+    sc_oracle = skill_score(mid_truth, pred_mid_oracle)
+    sc_solo   = skill_score(mid_truth, pred_mid_solo)
+    sr_oracle = std(pred_mid_oracle) / std(mid_truth)
+    sr_solo   = std(pred_mid_solo)   / std(mid_truth)
+    println("\n  MID band own-skill comparison:")
+    println("    NO cross-scale (A.2 baseline) : ACC=$(round(sc_solo.acc;  digits=3))   std_ratio=$(round(sr_solo;  digits=3))")
+    println("    WITH oracle slow cross-scale  : ACC=$(round(sc_oracle.acc;digits=3))   std_ratio=$(round(sr_oracle;digits=3))")
+    println("    Δ ACC due to oracle wiring    : $(round(sc_oracle.acc - sc_solo.acc; digits=3))")
+
+    # Use oracle mid in the final n34 prediction
+    n34_pred = pred_slow .+ pred_mid_oracle .+ pred_fast
+    preds_per_band = Dict(:slow => pred_slow, :mid => pred_mid_oracle, :fast => pred_fast)
+
 elseif mode == :full_cascade
     # A.4: full slow → mid → fast cascade. Two run_multi_layer calls chained
     # exactly like main_enso_monthly.jl:178–214 (spatial 18°→6°→2°), but
