@@ -38,29 +38,30 @@ std_ratio. ACC alone hides the damped-prediction failure mode.
 
 ---
 
-## Settled defaults (state of the art for monthly 3L pixel) — UPDATED E11
+## Settled defaults (state of the art for monthly 3L pixel) — UPDATED E12
 
-After the E11 joint multi-axis sweep, the best 3L configuration is:
+After the E12 early-lead sweep, the best 3L configuration is:
 
 ```
 mode = three_layer
-τ_coarse=15, τ_mid=10, τ_fine=3
-ridge_coarse=1e-3, ridge_mid=1e-2, ridge_fine=3.0   ← was 1.0
-g_layer_A_exp=-0.5, g_layer_B_exp=-1.0              ← A side: stronger
+τ_coarse=15, τ_mid=10, τ_fine=2                    ← τ_fine: was 3
+ridge_coarse=1e-3, ridge_mid=1e-2, ridge_fine=3.0
+g_layer_A_exp=-0.5, g_layer_B_exp=-1.0
 N_coarse=N_mid=N_fine=500
 rad_coarse=0.85, rad_mid=0.75, rad_fine=0.55
 grids: (3,1) → (9,3) → (9,4)
 mixing=2
 regression=quadratic
+warmup=12
 ```
 
-→ **12-mo Niño 3.4 ACC = 0.836 ± noise** (8-seed ensemble mean)
-→ **12-mo Niño 3.4 RMSE = 0.455** (was 0.469 at tauC15 default; baseline 0.480)
-→ **12-mo spatial pc = 0.450** (was 0.424 at tauC15; baseline 0.415)
-→ **std_ratio = 1.03** (was 1.35 — now near-perfect amplitude match)
+→ **12-mo Niño 3.4 ACC = 0.847** (was 0.836 at gAm0p5_rF3; baseline 0.828)
+→ **12-mo Niño 3.4 RMSE = 0.406** (was 0.455; baseline 0.480 — 15.4% lower)
+→ **12-mo spatial pc = 0.449** (was 0.450 — essentially equal; baseline 0.415)
+→ **std_ratio = 1.15** (close to perfect 1.0)
 
-This config wins on ALL three metrics simultaneously vs the previous best.
-Run as: `ENSO_TAU_COARSE=15 ENSO_GLAYER_A_EXP=-0.5 ENSO_RIDGE_FINE=3.0`
+Run as:
+`ENSO_TAU_COARSE=15 ENSO_GLAYER_A_EXP=-0.5 ENSO_RIDGE_FINE=3.0 ENSO_TAU_FINE=2`
 
 **Hyperparameter sensitivity ranking (high → low):**
 1. τ_fine — sharp sweet spot at 3; 10+ collapses model.
@@ -79,6 +80,37 @@ architecture. Going beyond requires structural change — see project memory
 `project_temporal_multiscale_idea.md`.
 
 ---
+
+## E12 — 3L early-lead optimization sweep (2026-04-28)
+**Question:** the user observed in the n34_champion plot that the gAm0p5_rF3
+forecast was visually "stretched right" (phase lag ≈ 4 months) and the post-
+12-month error was unacceptable. Can we improve early-lead RMSE by tuning
+τ_coarse, τ_fine, or warmup?
+**Setup:** at gAm0p5_rF3 baseline, sweep:
+- τ_coarse ∈ {5, 7, 10}  (untested below 15)
+- τ_fine  ∈ {1, 2}        (untested below 3 — E6 only tested {3, 10, 20})
+- warmup  ∈ {18, 24, 36}  (default 12)
+3 seeds × 8 configs = 24 runs.
+Then 8-seed confirmation of best candidates.
+**Outcome — major win on RMSE:**
+- τ_fine=2 (8 seeds): ACC=0.847, RMSE=0.406, pc=0.449, std_ratio=1.15
+  - **15.4% RMSE reduction over E1 baseline** (0.480 → 0.406)
+  - 10.8% RMSE reduction over E11 champion (0.455 → 0.406)
+  - pc essentially unchanged (0.450 → 0.449)
+- τ_fine=1 (8 seeds): RMSE 0.381 (even lower) but pc drops to 0.409
+- τ_coarse < 15: all worse on RMSE; phase lag goes to +5 (worse).
+- warmup > 12: all worse; warmup=36 catastrophic (RMSE 0.594).
+**Key insight:** the E6 conclusion "τ_fine sweet spot at 3" was wrong because
+we never tested below 3. True sweet spot is at 2. With τ_fine=2 (α=0.5), the
+fine layer has minimal memory — letting the coarse-mid layers carry the slow
+envelope while the fine layer applies spatial detail. τ_fine=1 (memoryless)
+goes too far and pc drops; τ_fine=3 has unnecessary memory and adds RMSE.
+**Phase lag of +4 months is structural** — same in all 3L configs we tested.
+Reducing τ_coarse below 15 doesn't help; warmup variation doesn't help.
+Likely a fundamental property of training a reservoir on ~5 ENSO cycles to
+forecast a system with that periodicity.
+**Adopted as new 3L default.**
+**Output:** `results/tune_3L/champion_tauF2_8seed/`
 
 ## E11 — 3L joint multi-axis sweep + Pareto analysis (2026-04-27/28)
 **Question:** can simultaneous improvement on all three metrics (ACC, RMSE,

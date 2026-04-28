@@ -46,11 +46,11 @@ outdir = get(ENV, "ENSO_OUTDIR", "results")
 
 # Monthly pipeline: 1 reservoir step = 1 calendar month.
 # 1982-01..2015-12 = 34 yr × 12 = 408 months total.
-washout     = 12            # 1 yr washout before ridge regression
-train_len   = 288           # 24 yr training window (covers ~5 ENSO cycles)
-predict_len = 96            # 8 yr autonomous forecast
-warmup      = 12            # 1 yr state warm-up from true data
-dt          = 1.0           # 1 month / step
+washout     = parse(Int,    get(ENV, "ENSO_WASHOUT",     "12"))   # months discarded before ridge
+train_len   = parse(Int,    get(ENV, "ENSO_TRAIN_LEN",   "288"))
+predict_len = parse(Int,    get(ENV, "ENSO_PREDICT_LEN", "96"))
+warmup      = parse(Int,    get(ENV, "ENSO_WARMUP",      "12"))   # months of open-loop on truth
+dt          = 1.0
 
 lon_range = (126.0, 288.0)
 lat_range = (-36.0, 36.0)
