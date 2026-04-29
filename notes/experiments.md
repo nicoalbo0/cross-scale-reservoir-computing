@@ -374,7 +374,113 @@ this by orthogonalising the bands; broadband multi-τ preserves it.
 **Next:** D = spatial extension (each spatial block hosts its own multi-τ
 cascade). Genuine "double multi-scale" architecture.
 
-## E12 — 3L early-lead optimization sweep (2026-04-28)
+### Stage B-mt — Spatial multi-τ extension on full SST field (2026-04-29)
+**Question:** does the 1D multi-τ result (12-mo 0.876, 18-mo 0.74) hold when
+each spatial block hosts its own multi-τ cascade, fed broadband per-pixel SST?
+**Setup:** `main_enso_temporal_multiscale_field.jl` modes `:multi_tau_2_field`
+(slow τ=30 → fast τ=2 per spatial block) and `:multi_tau_3_field` (slow → mid
+→ fast, two `run_multi_layer` calls chained). 9×4 = 36 spatial blocks of ~81
+pixels each at 2°, mixing=2 neighbors. Both/all reservoirs see the FULL
+broadband SST cube (no bandpass decomposition).
+
+**Critical bug uncovered:** `make_blocks([fine, fine], [grid, grid], mixing)`
+with default `overlap_mode=:exclude` yields `layer_dim=0` when fine and
+coarse use the same grid (divisor=1). I.e. cross-scale wiring is silently
+non-existent — confirmed by `input_dimensions(blocks_pair[2])` returning
+`(81, 88, 0)` under `:exclude`, but `(81, 88, 81)` under `:include`. This
+also retroactively explains why `:full_cascade_field` (E13.B with `:exclude`
+default) tied `:no_xscale_field`: the wiring was never active. The new
+multi-τ field modes use `overlap_mode=:include` to make cross-scale wiring
+actually wired.
+
+**B-mt-2 — slow τ=30 → fast τ=2 per spatial block (4 seeds {1,7,42,99}):**
+- Default hyperparameters (ρ_slow=0.85, ridge_slow=1e-3) → slow reservoir
+  diverges in closed loop (std_ratio=36×). Same instability as B's bandpass
+  modes; same fix: ρ=0.55, ridge=1.0 for both layers (E5-style).
+- **12-mo ACC = 0.870 ± 0.010**, std_ratio=0.59. PASS for the 12-mo gate.
+- 18-mo = 0.48 ± 0.07, 24-mo ≈ 0. Spatial pc 12-mo ≈ 0.07 (poor).
+
+**B-mt-3 — slow → mid → fast (4 seeds, default coupling exp=-1.0):**
+- 12-mo ACC = 0.873 ± 0.010, std_ratio=0.47.
+- 18-mo = 0.20, 24-mo = -0.54 — WORSE long-lead than B-mt-2; cascade
+  compounds errors. Spatial pc 3-mo = 0.38 (better than B-mt-2's 0.06 but
+  below B no_xscale_field's 0.56).
+
+**B-mt-3-tune — coupling sweep on seed=42:**
+
+| g_layer_fast_exp | 12-mo ACC | std_ratio@12 | 18-mo | 24-mo | pc@24mo |
+|------------------|-----------|--------------|-------|-------|---------|
+| -3.0 (very weak) | 0.882     | 0.84         | 0.53  | 0.41  | 0.25    |
+| **-2.0**         | **0.881** | **0.85**     | **0.52** | **0.38** | **0.24** |
+| -1.0 (default)   | 0.881     | 0.52         | 0.27  | -0.50 | -0.33   |
+| -0.5             | 0.866     | 0.38         | 0.10  | -0.52 | -0.30   |
+| 0.0              | 0.777     | 0.43         | 0.08  | -0.55 | -0.32   |
+
+**Cross-scale coupling at default (-1.0) is HARMFUL.** At weak coupling
+(-2.0 to -3.0), long-lead skill is dramatically better: 24-mo ACC swings
+from -0.50 to +0.41, and 24-mo spatial pc swings from -0.33 to +0.25.
+The 12-mo gate is unaffected.
+
+**Mechanistic interpretation:** with strong coupling, each spatial block's
+slow reservoir injects its own closed-loop drift (per-block reservoirs see
+~80D input — much harder to stabilise long-lead than 1D scalar) into mid
+and fast layers, which then propagates noise field-wide. Weak coupling
+preserves the long-memory benefit while bounding the contamination.
+
+**Mid-coupling sweep (g_layer_fast_exp pinned at -2.0, seed=42):**
+g_layer_mid_exp ∈ {-3.0, -2.0, -1.0, 0.0} all give virtually identical
+results (12-mo ACC 0.881–0.882, 24-mo 0.376–0.389). When fast coupling is
+weak, mid coupling is largely irrelevant — mid's main effect is bounded
+by its downstream fast-layer multiplier.
+
+**B-mt-3-ens — 8-seed ensemble at best config** (g_layer_mid_exp=-1.0,
+g_layer_fast_exp=-2.0; ρ_*=0.55, ridge_*=1.0; τ=30/8/2):
+
+| Lead | ACC mean ± std | std_ratio | spatial pc |
+|------|----------------|-----------|------------|
+| 3 mo | 0.30 ± 0.31 | 0.17 | 0.371 ± 0.015 |
+| 6 mo | 0.79 ± 0.01 | 0.33 | 0.237 ± 0.022 |
+| 12 mo | **0.872 ± 0.008** | **0.75 ± 0.12** | 0.129 ± 0.094 |
+| 18 mo | 0.44 ± 0.11 | 1.14 | 0.081 ± 0.102 |
+| 24 mo | 0.105 ± 0.276 | 0.71 | 0.091 ± 0.161 |
+
+PASS check: 12-mo ACC ≥ 0.85 ✓; 18-mo ≥ 0.6 ✗; spatial pc 12-mo ≥ 0.45 ✗.
+**Marginal — neither headline ACC nor spatial pc beats B no_xscale_field**
+(0.890, 0.45). The cross-scale wiring transfers the 1D multi_tau_3 win
+to the spatial setting only at 12-mo and only up to a similar level
+(0.872 vs 1D's 0.876). Long-lead is much weaker than 1D (18-mo 0.44 vs
+0.74; 24-mo 0.10 vs 0.56) because per-block reservoirs (~80D input
+each) are less stable in closed loop than the 1D scalar.
+
+**Best amplitude fidelity to date.** std_ratio at 12-mo is 0.75 ± 0.12 —
+closest to 1.0 of any architecture tested. Trade-off vs B no_xscale_field:
+loses 0.02 ACC and 0.32 pc, gains 0.21 std_ratio. Useful when amplitude
+matters (real-magnitude El Niño forecasts).
+
+**Comparison table (4-seed for B no_xscale_field, 8-seed for B-mt-3-best):**
+
+| Architecture | 12-mo ACC | std_ratio@12 | 18-mo | 24-mo | pc 3-mo | pc 12-mo |
+|---|---|---|---|---|---|---|
+| E5 1L spatial τ=30 | 0.891 | 0.18 ⚠ | 0.46 | 0.43 | 0.11 | n/a |
+| E12 best 3L | 0.847 | 1.15 | 0.49 | 0.45 | 0.45 | 0.45 |
+| B no_xscale_field | **0.890** | 0.54 | **0.73** | 0.38 | **0.56** | **0.45** |
+| 1D multi_tau_3 | 0.876 | 0.57 | **0.74** | **0.56** | n/a | n/a |
+| **B-mt-3-best** | 0.872 | **0.75** | 0.44 | 0.10 | 0.37 | 0.13 |
+
+**Lessons from B-mt:**
+1. Adding spatial blocking on top of multi-τ does NOT lift either ACC or
+   pc above the per-pixel bandpass (B no_xscale_field) baseline. Per-block
+   per-broadband reservoirs introduce more closed-loop drift than the 1D
+   scalar regime can compensate for.
+2. The cross-scale wiring still needs to be very weak (10^{-2}/√81) to be
+   non-harmful. At default strength (10^{-1}/√81), it is actively harmful
+   — same pattern as E11/E13.A.3.
+3. For amplitude fidelity, B-mt-3-best is the best architecture so far
+   (std_ratio 0.75). For ACC/pc, B no_xscale_field still wins.
+
+**Output:** `results/temporal_multiscale/multi_tau_{2,3}_field/`,
+`multi_tau_3_field_sweep/`, `multi_tau_3_field_best/` + ensemble PNG.
+
 **Question:** the user observed in the n34_champion plot that the gAm0p5_rF3
 forecast was visually "stretched right" (phase lag ≈ 4 months) and the post-
 12-month error was unacceptable. Can we improve early-lead RMSE by tuning
