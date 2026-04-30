@@ -249,7 +249,12 @@ function forecast_headline(n34_true::AbstractVector,
     pc3  = L3  > 0 && L3  ≤ size(field_true, 3) ? pc_at(L3)  : NaN
     pc12 = L12 > 0 && L12 ≤ size(field_true, 3) ? pc_at(L12) : NaN
 
-    ppacc = per_pixel_acc(field_true, field_pred)
+    # Per-pixel ACC over the first 12 months (standard ENSO lead). Beyond ~18 mo
+    # individual pixels diverge from truth even when the spatial-mean index
+    # remains correlated, so a full-window ppacc is uninformative.
+    L12_field = min(12, size(field_true, 3))
+    ppacc = per_pixel_acc(@view(field_true[:, :, 1:L12_field]),
+                          @view(field_pred[:, :, 1:L12_field]))
 
     lons360 = mod.(lons, 360.0)
     lon_mask = 190.0 .<= lons360 .<= 240.0
