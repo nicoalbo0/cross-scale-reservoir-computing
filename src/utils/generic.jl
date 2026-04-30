@@ -192,6 +192,80 @@ function skill_score(index_true::AbstractVector, index_pred::AbstractVector)
 end
 
 """
+    per_pixel_acc(field_true_3d, field_pred_3d) -> Matrix{Float64}
+
+Anomaly correlation coefficient at each (lon, lat) pixel between the truth and
+forecast 3D arrays of shape `(nlon, nlat, nt)`. Returns an `(nlon × nlat)` matrix.
+
+NaN at pixels with zero temporal variance in either input (e.g. land mask after
+zero-fill); callers should mask those out before averaging.
+"""
+function per_pixel_acc(field_true::AbstractArray{<:Real, 3},
+                       field_pred::AbstractArray{<:Real, 3})
+    @assert size(field_true) == size(field_pred) "field_true and field_pred must match"
+    nlon, nlat, _ = size(field_true)
+    out = fill(NaN, nlon, nlat)
+    @inbounds for i in 1:nlon, j in 1:nlat
+        t = @view field_true[i, j, :]
+        p = @view field_pred[i, j, :]
+        σt = std(t); σp = std(p)
+        if σt > 0 && σp > 0
+            μt = mean(t); μp = mean(p)
+            out[i, j] = mean((t .- μt) .* (p .- μp)) / (σt * σp)
+        end
+    end
+    return out
+end
+
+"""
+    forecast_headline(n34_true, n34_pred, field_true_3d, field_pred_3d, lons, lats; nino_box_only=false)
+        -> NamedTuple
+
+Compact 7-tuple summary used by the Stage E comparison pipeline:
+- `acc12`, `rmse12`, `std_ratio12` — 12-month-cumulative Niño 3.4 metrics
+- `pc3`, `pc12` — spatial pattern correlations at 3 and 12 months
+- `ppacc_n34_mean` — per-pixel ACC averaged inside the Niño 3.4 box (190°–240°E, ±5°)
+- `ppacc_global_mean` — per-pixel ACC averaged over all non-NaN pixels
+
+NaN pixels (land or zero-variance) are excluded from the means.
+"""
+function forecast_headline(n34_true::AbstractVector,
+                           n34_pred::AbstractVector,
+                           field_true::AbstractArray{<:Real, 3},
+                           field_pred::AbstractArray{<:Real, 3},
+                           lons::AbstractVector,
+                           lats::AbstractVector)
+    L12 = min(12, length(n34_true))
+    L3  = min(3,  length(n34_true))
+    s12 = skill_score(n34_true[1:L12], n34_pred[1:L12])
+    sr12 = std(n34_pred[1:L12]) / std(n34_true[1:L12])
+
+    function pc_at(t)
+        a = vec(@view field_true[:, :, t])
+        b = vec(@view field_pred[:, :, t])
+        am = a .- mean(a); bm = b .- mean(b)
+        return dot(am, bm) / (norm(am) * norm(bm) + eps())
+    end
+    pc3  = L3  > 0 && L3  ≤ size(field_true, 3) ? pc_at(L3)  : NaN
+    pc12 = L12 > 0 && L12 ≤ size(field_true, 3) ? pc_at(L12) : NaN
+
+    ppacc = per_pixel_acc(field_true, field_pred)
+
+    lons360 = mod.(lons, 360.0)
+    lon_mask = 190.0 .<= lons360 .<= 240.0
+    lat_mask = -5.0  .<= lats   .<= 5.0
+    n34_box = ppacc[lon_mask, lat_mask]
+    n34_valid = filter(!isnan, vec(n34_box))
+    global_valid = filter(!isnan, vec(ppacc))
+
+    return (acc12 = s12.acc, rmse12 = s12.rmse, std_ratio12 = sr12,
+            pc3 = pc3, pc12 = pc12,
+            ppacc_n34_mean    = isempty(n34_valid)    ? NaN : mean(n34_valid),
+            ppacc_global_mean = isempty(global_valid) ? NaN : mean(global_valid),
+            ppacc_map = ppacc)
+end
+
+"""
     rmse_upto(data, pred; T=size(data, 2), coords=axes(data, 1))
 
 Compute RMSE over the first `T` time steps and over rows indexed by `coords`.

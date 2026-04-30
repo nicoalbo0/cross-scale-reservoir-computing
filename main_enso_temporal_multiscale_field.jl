@@ -66,11 +66,13 @@ seed_tag = "seed$(seed)"
 outdir   = get(ENV, "ENSO_OUTDIR",
                joinpath("results", "temporal_multiscale", mode_tag))
 
-washout     = 12
-train_len   = 288
-predict_len = 96
-warmup      = 12
-dt          = 1.0
+washout      = 12
+train_start  = parse(Int, get(ENV, "ENSO_TRAIN_START", "1"))      # 1-indexed monthly offset
+train_len    = parse(Int, get(ENV, "ENSO_TRAIN_LEN",   "288"))
+predict_len  = parse(Int, get(ENV, "ENSO_PREDICT_LEN", "96"))
+warmup       = 12
+dt           = 1.0
+window_label = get(ENV, "ENSO_WINDOW_LABEL", "")  # optional tag, e.g. "W1"
 
 lon_range  = (126.0, 288.0)
 lat_range  = (-36.0, 36.0)
@@ -118,10 +120,15 @@ println("  ρ slow/mid/fast = $(ρ_slow) / $(ρ_mid) / $(ρ_fast)")
 # ---------------------------------------------------------------------------
 
 println("\nLoading 2° SST anomalies (daily) ...")
+# Climatology is computed from days corresponding to the *current* monthly train
+# window — prevents leakage of post-train info into the anomaly definition for
+# rolling-window CV.
+clim_day_lo = (train_start - 1) * 30 + 1
+clim_day_hi = (train_start - 1 + train_len) * 30
 data_vec_daily, _ = load_data(
     [2.0]; show_data = false, refinement = 1,
     lon_range = lon_range, lat_range = lat_range,
-    anomalies = true, train_indices = 1:(train_len * 30),
+    anomalies = true, train_indices = clim_day_lo:clim_day_hi,
 )
 
 function daily_to_monthly(daily::AbstractArray{<:Real, 3}, start_date::Date)
@@ -138,12 +145,23 @@ function daily_to_monthly(daily::AbstractArray{<:Real, 3}, start_date::Date)
 end
 
 println("Binning to monthly ...")
-fine_2d = daily_to_monthly(data_vec_daily[1], start_date)
-nlon_f, nlat_f, Ttot = size(fine_2d)
-println("  monthly cube: $(nlon_f)×$(nlat_f) × $(Ttot)")
+fine_2d_full = daily_to_monthly(data_vec_daily[1], start_date)
+nlon_f, nlat_f, Ttot_full = size(fine_2d_full)
+println("  full monthly cube: $(nlon_f)×$(nlat_f) × $(Ttot_full)")
+
+# --- crop to the rolling-window slice. We slice from `train_start` to the END of the
+# available archive (rather than just train_len+predict_len+warmup) so that the
+# bandpass filter has maximum context and the test window sits at most ~12 mo from the
+# right edge, not at the edge itself.
+need_len    = train_len + predict_len + warmup
+required_end = train_start + need_len - 1
+@assert required_end ≤ Ttot_full ("Need months $(train_start)..$(required_end), have $(Ttot_full).")
+fine_2d = fine_2d_full[:, :, train_start:end]
+Ttot    = size(fine_2d, 3)
+println("  window months: $(train_start)..$(train_start + Ttot - 1)  (need $(required_end))  (label=$(isempty(window_label) ? "default" : window_label))")
 @assert train_len + predict_len ≤ Ttot
 
-# Per-pixel z-score using training-window stats. NaN → 0 (land mask).
+# Per-pixel z-score using training-window stats only. NaN → 0 (land mask).
 for i in 1:nlon_f, j in 1:nlat_f
     ts = @view fine_2d[i, j, :]
     if any(isnan, ts); ts .= 0.0; end
@@ -248,23 +266,32 @@ if mode == :no_xscale_field
     pred_fast_mat = _train_band_field(fast_mat, τ_fast, ridge_fast, N_fast, ρ_fast)
 
 elseif mode == :full_cascade_field
-    println("\n--- :full_cascade_field — slow → mid → fast cross-scale at SAME spatial blocks ---")
+    use_include = parse(Bool, get(ENV, "ENSO_FULL_CASCADE_INCLUDE", "false"))
+    if use_include
+        println("\n--- :full_cascade_field — slow → mid → fast cross-scale (overlap_mode=:include, BUG-FIXED) ---")
+        bcoarse = blocks_xs_coarse
+        bfine   = blocks_xs_fine
+    else
+        println("\n--- :full_cascade_field — slow → mid → fast cross-scale at SAME spatial blocks (legacy :exclude, layer_dim=0) ---")
+        bcoarse = blocks_band_coarse
+        bfine   = blocks_band_fine
+    end
 
-    rec_c, neigh_c, _       = input_dimensions(blocks_band_coarse)
-    rec_f, neigh_f, layer_f = input_dimensions(blocks_band_fine)
+    rec_c, neigh_c, _       = input_dimensions(bcoarse)
+    rec_f, neigh_f, layer_f = input_dimensions(bfine)
 
     g_rec_A   = [10^(-0.5)/√rec_c,   10^(-0.5)/√rec_f]
     g_neigh_A = [10^(-0.5)/√max(neigh_c, 1), 10^(-0.5)/√max(neigh_f, 1)]
-    g_layer_A = [0.0,                 10^(glayer_mid_exp)/√layer_f]
+    g_layer_A = [0.0,                 layer_f > 0 ? 10^(glayer_mid_exp)/√layer_f : 0.0]
     params_A = ([N_slow, N_mid], [ρ_slow, ρ_mid], [10, 10],
                 g_rec_A, g_neigh_A, g_layer_A,
                 [τ_slow, τ_mid], [dt, dt])
 
-    println("  Call A: slow → mid ...")
+    println("  Call A: slow → mid (g_layer_mid=10^$(glayer_mid_exp)/√$(max(layer_f,1))) ...")
     preds_mid_A, preds_slow_A, train_pred_mid_A, train_pred_slow_A,
         _, _, _, _, _ = run_multi_layer(
             params_A, mid_mat, slow_mat, train_len, predict_len,
-            [blocks_band_coarse, blocks_band_fine];
+            [bcoarse, bfine];
             washout = washout, warmup = warmup,
             ridge_parameter = [ridge_slow, ridge_mid],
             show_progress = true, input_mode = :random,
@@ -275,7 +302,7 @@ elseif mode == :full_cascade_field
 
     g_rec_B   = [10^(-0.5)/√rec_c,   10^(-0.5)/√rec_f]
     g_neigh_B = [10^(-0.5)/√max(neigh_c, 1), 10^(-0.5)/√max(neigh_f, 1)]
-    g_layer_B = [0.0,                 10^(glayer_fast_exp)/√layer_f]
+    g_layer_B = [0.0,                 layer_f > 0 ? 10^(glayer_fast_exp)/√layer_f : 0.0]
     params_B = ([N_mid, N_fast], [ρ_mid, ρ_fast], [10, 10],
                 g_rec_B, g_neigh_B, g_layer_B,
                 [τ_mid, τ_fast], [dt, dt])
@@ -283,7 +310,7 @@ elseif mode == :full_cascade_field
     println("  Call B: mid → fast ...")
     preds_fast_B, preds_mid_B, _, _, _, _, _, _, _ = run_multi_layer(
         params_B, fast_mat, coarse_for_B, train_len, predict_len,
-        [blocks_band_coarse, blocks_band_fine];
+        [bcoarse, bfine];
         washout = washout, warmup = warmup,
         ridge_parameter = [ridge_mid, ridge_fast],
         show_progress = true, input_mode = :random,
@@ -583,6 +610,13 @@ if !isfile(ref_path)
     println("Saved reference: $(ref_path)")
 end
 
+headline = forecast_headline(n34_true, n34_pred, field_true_3d, field_pred_3d, lons_f, lats_f)
+
+println("\n=== Stage-E headline tuple ===")
+println("  acc12=$(round(headline.acc12;digits=3))  rmse12=$(round(headline.rmse12;digits=4))  std_ratio12=$(round(headline.std_ratio12;digits=3))")
+println("  pc3=$(round(headline.pc3;digits=3))  pc12=$(round(headline.pc12;digits=3))")
+println("  ppacc_n34_mean=$(round(headline.ppacc_n34_mean;digits=3))  ppacc_global_mean=$(round(headline.ppacc_global_mean;digits=3))")
+
 save_kwargs = Dict{Symbol, Any}(
     :compress       => true,
     :n34_pred       => Float32.(n34_pred),
@@ -597,6 +631,19 @@ save_kwargs = Dict{Symbol, Any}(
     :full_acc       => sc.acc, :full_rmse => sc.rmse, :full_rmse_skill => sc.rmse_skill,
     :std_ratio_full => std_ratio_full,
     :seed           => seed, :mode_tag => mode_tag,
+    # Stage-E additions
+    :acc12              => headline.acc12,
+    :rmse12             => headline.rmse12,
+    :std_ratio12        => headline.std_ratio12,
+    :pc3                => headline.pc3,
+    :pc12               => headline.pc12,
+    :ppacc_n34_mean     => headline.ppacc_n34_mean,
+    :ppacc_global_mean  => headline.ppacc_global_mean,
+    :ppacc_map          => Float32.(headline.ppacc_map),
+    :train_start        => train_start,
+    :train_len          => train_len,
+    :predict_len        => predict_len,
+    :window_label       => window_label,
 )
 # mid_pred only meaningful for 3-band / 3-τ modes
 if needs_bands || mode == :multi_tau_3_field

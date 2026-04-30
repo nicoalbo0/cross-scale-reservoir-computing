@@ -57,6 +57,9 @@ export sst_grid_coords
 export bandpass_decompose
 export bandpass_decompose_field
 export reconstruct_bands
+export per_pixel_acc
+export forecast_headline
+export rolling_windows
 
 include("types.jl")
 include("data/loading.jl")
@@ -64,6 +67,7 @@ include("data/regrid.jl")
 include("data/grids.jl")
 include("data/temporal_decomposition.jl")
 include("utils/generic.jl")
+include("utils/rolling_window.jl")
 include("utils/deeprc_utils.jl")
 include("utils/ngrc_utils.jl")
 include("utils/gridsearch_utils.jl")
