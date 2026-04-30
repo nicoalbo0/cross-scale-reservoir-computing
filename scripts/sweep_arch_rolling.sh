@@ -26,11 +26,13 @@ mkdir -p "$ROOT"
 LOGDIR="$ROOT/_logs"; mkdir -p "$LOGDIR"
 
 # Window definitions: id, train_start, train_len, predict_len
+# All windows must satisfy: train_start + train_len + predict_len + warmup(12) - 1 ≤ 408
+# (the SST archive ends 2015-12; 408 monthly samples from 1982-01).
 WINDOWS=(
     "W1 1 288 96"
-    "W2 37 288 84"
+    "W2 37 288 72"
     "W3 1 240 96"
-    "W4 1 336 72"
+    "W4 1 336 60"
 )
 
 run_champ () {

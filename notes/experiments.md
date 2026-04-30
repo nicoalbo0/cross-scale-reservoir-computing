@@ -121,6 +121,78 @@ faithful** (so running fresh reproduces the paper). Champion config requires
 explicit overrides (see "Settled defaults" block at top of this file).
 **Output:** `results/tune_3L/paperfaithful_8seed/`.
 
+## Stage E — Decisive comparison: frequency-band vs timescale multiscale (2026-04-30)
+
+**Question:** which is the better temporal-multiscale architecture for ENSO —
+A=frequency-band (`:no_xscale_field`, bandpass + per-band reservoirs) or
+B=timescale (`:multi_tau_3_field`, broadband + multi-τ cascade)?
+**Setup:** Tier 1 coarse → Tier 2 finer → Tier 3 4-window rolling-window
+robustness → Tier 4 8-seed paired Wilcoxon. Champion configs:
+- A: ridge=(3e-2, 1e-1, 10), default cuts (1/24, 1/3), default ρ=(0.85, 0.75, 0.55).
+- B: τ=(35, 10, 3), ρ=0.55 all, ridge_slow=1.0, glayer_fast=10^-2.
+- D (sanity): bug-fixed `:full_cascade_field` with `overlap_mode=:include`,
+  ridge=(1e-2, 1e-1, 10), glayer=(-2, -2). Cleared the gate at Tier 0.
+
+**Tier 3 robustness (4 windows × 4 seeds at champion):**
+
+| Arch | mean ACC | worst-window ACC | mean pc₃ | robust composite |
+|------|----------|------------------|----------|-------------------|
+| A    | 0.888    | 0.868            | 0.523    | **0.809** |
+| D    | 0.881    | 0.845            | 0.442    | 0.782 |
+| B    | 0.807    | 0.637            | 0.425    | 0.680 |
+
+B has a **catastrophic W2 failure** (acc=0.637 ± 0.109 across seeds;
+sr12=0.18). The multi-τ architecture is brittle when train_start shifts.
+A is uniformly stable (sr12 always ≈ 1.0).
+
+**Tier 4 8-seed paired Wilcoxon at W1 (signed = A − B):**
+
+| Metric                | Δ(A−B) | p     | Cohen's d |
+|-----------------------|--------|-------|-----------|
+| acc12                 | +0.008 | 0.016 | +1.64     |
+| pc3 (spatial)         | +0.267 | 0.008 | +16.6     |
+| std_ratio12           | +0.04  | 0.31  | +0.40 (tie) |
+| **rmse12** (lower=better) | **+0.27** | **0.008** | +3.5 (B wins) |
+| **ppacc_n34_box**     | **−0.18** | **0.008** | −1.4 (B wins) |
+
+**Pre-registered decision: A WINS (p=0.016 < 0.05).** A is statistically
+significantly better at the headline ACC and dramatically better at the
+spatial pattern correlation (Cohen's d=16.6). B does win on absolute RMSE
+and per-pixel ACC inside the Niño 3.4 box — see Pareto note below.
+
+**Pareto / per-pixel diagnostic (`per_pixel_acc_maps.png`):**
+
+| Arch | mean per-pixel ACC inside Niño 3.4 box |
+|------|----------------------------------------|
+| A    | **−0.058** (negative!) |
+| B    | +0.119 |
+| D    | −0.031 |
+
+A wins the *aggregated* Niño 3.4 index (the standard ENSO benchmark) but
+its predictions at individual pixels inside the 3.4 box are anti-correlated
+with truth on average. B is amplitude-collapsed but each pixel carries small
+positive correlation. **A's mechanism is "predict the box-mean well as an
+aggregate", not "predict each pixel".** This is a real caveat for Stage F
+(spatial multi-scale on top of A) — the architecture's per-pixel
+predictions are not load-bearing for its index skill.
+
+**Stage E conclusion.** Frequency-band multiscale (Architecture A) is the
+winner of the temporal-multiscale comparison. Stage F (spatial × temporal
+cross-scale tensor product) should be designed using A as the temporal
+front-end, NOT multi-τ. D (bug-fixed bandpass + cross-scale wiring) is
+competitive but always slightly worse than A on both ACC and pc3 → confirms
+the A.6 oracle finding that cross-scale wiring adds nothing on bandpass
+inputs (orthogonal bands → no info to transfer).
+
+**Compute.** Tier 1: 22 cells × 3 seeds = 66 runs. Tier 2: 16 cells × 3
+seeds = 48 runs. Tier 3: 12 cells × 4 seeds = 48 runs (4 W1 cells reused
+for Tier 4). Tier 4: 12 new seed runs (4 W1 cells reused from Tier 3).
+Total ~3.5 h wall-clock at 4 threads.
+
+**Files.** `results/temporal_multiscale_compare/{tier1,tier2_finer,tier3_rolling,tier4_head_to_head}/`
+plus `rolling_summary.png`, `per_pixel_acc_maps.png`. Per-cell summaries in
+`*_summary.csv`. Stat-test invocation in `scripts/stat_test_head_to_head.jl`.
+
 ## E13 — Temporal cross-scale RC on Niño 3.4 (Stage A: 1D scalar) (2026-04-27)
 **Question:** does temporal-band decomposition + cross-scale wiring on the
 1D Niño 3.4 series outperform a single un-decomposed 1D reservoir? Tests
