@@ -175,6 +175,54 @@ damped persistence), then re-rank A/B/D under the new metric. Decision
 gate: if no architecture decisively beats damped persistence, project's
 deliverable becomes a careful negative result with corrected methodology.
 
+### Stage G.1 + G.3 results (event-skill metric, lead_window=(3,36)) — 2026-05-05
+
+Two events fall in (3, 36): L=12 warm (+1.12) and L=25 cold (−2.12). Computed
+on existing W1 8-seed JLD2s with the new `event_skill` metric:
+
+| Arch | Sign acc | Mean event pc | Weighted event pc | False alarms |
+|------|----------|---------------|--------------------|---------------|
+| **B_multi_tau_3_field** | **1.000 ± 0.000** | **0.227 ± 0.077** | **0.229 ± 0.082** | 0.00 |
+| D_full_cascade_field   | 0.500 ± 0.000 | 0.135 ± 0.026 | 0.071 ± 0.033 | 0.25 |
+| A_no_xscale_field      | 0.500 ± 0.000 | 0.061 ± 0.024 | **−0.003 ± 0.032** | 0.00 |
+
+### Stage G.2 — baselines on W1 (deterministic, seed=0)
+
+| Baseline | acc12 | event_pc weighted | sign_acc |
+|----------|-------|--------------------|----------|
+| climatology              | NaN  (constant 0)        | 0.000 | 0.0 |
+| persistence              | 0.000 (degenerate const) | 0.149 | 0.5 |
+| damped_persistence τ=3   | 0.842                    | 0.149 | 0.5 |
+| damped_persistence τ=6   | 0.891                    | 0.149 | 0.5 |
+| **damped_persistence τ=12** | **0.903** (beats all archs!) | 0.149 | 0.5 |
+
+**Devastating finding.** Damped persistence τ=12 hits **acc12 = 0.903** —
+*above* A (0.872), B (0.863), D (0.865). The entire Stage E comparison
+was happening below the trivial baseline floor and we didn't realize it.
+
+On event-pattern skill, only **B beats damped persistence**:
+- B weighted_pc = 0.229 vs damped_pers = 0.149 → +0.08 above the bar.
+- B is the only architecture with sign accuracy = 1.0 (predicts both
+  events in window correctly).
+- A's weighted_pc is essentially ZERO (phase-aligned spatial pattern at
+  events is uncorrelated with truth) — A is *worse than persistence*.
+
+Stage E's verdict (A wins) is not just misleading for event prediction —
+it's actively wrong against the right benchmark. The correct ranking is
+**B > damped_persistence > D > A**, and the only meaningful skill above
+baselines is B's +0.08 weighted_pc gain.
+
+**Files.** `scripts/run_baselines.jl` (writes per-baseline JLD2 in same
+format as reservoir runs), `scripts/event_skill_table.jl` (computes the
+table), `src/baselines/forecast_baselines.jl` (climatology / persistence
+/ damped persistence). Per-seed CSV at `results/stage_G/event_skill_one_step.csv`.
+
+Next: G.4 — multi-horizon training objective. The hypothesis is that
+training to minimize spatial pattern error at multiple horizons (instead
+of one-step-ahead) will pull A and D up (and possibly B further) above
+baselines. If multi-horizon doesn't move the needle, Stage G.6 declares
+the negative result.
+
 **Files.** `scripts/plot_event_aligned.jl` (event detector + per-event
 maps), `stage_E_event_aligned.png`, `stage_E_phase_diag.png`. Sign-/pc-
 table reproduced by re-running the script. Pixel-aspect cosmetics fixed

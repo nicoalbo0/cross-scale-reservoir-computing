@@ -63,12 +63,16 @@ export rolling_windows
 export find_enso_events
 export phase_aligned_pc
 export event_skill
+export forecast_persistence
+export forecast_damped_persistence
+export forecast_climatology
 
 include("types.jl")
 include("data/loading.jl")
 include("data/regrid.jl")
 include("data/grids.jl")
 include("data/temporal_decomposition.jl")
+include("baselines/forecast_baselines.jl")
 include("utils/generic.jl")
 include("utils/rolling_window.jl")
 include("utils/deeprc_utils.jl")
