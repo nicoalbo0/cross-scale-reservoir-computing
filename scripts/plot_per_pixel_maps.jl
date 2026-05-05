@@ -48,7 +48,8 @@ for (label, dir) in ARCHS
         xlabel = "lon (°E)", ylabel = "lat (°N)"))
 end
 
-p = plot(panels...; layout = (length(ARCHS), 2), size = (1600, 350 * length(ARCHS)),
+panel_w, panel_h = 720, 280
+p = plot(panels...; layout = (length(ARCHS), 2), size = (2 * panel_w, panel_h * length(ARCHS)),
          left_margin = 4mm, bottom_margin = 4mm, plot_title = "Stage E Tier 4 — per-pixel ACC at W1")
 out = joinpath(ROOT, "per_pixel_acc_maps.png")
 savefig(p, out)
