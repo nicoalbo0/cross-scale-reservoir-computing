@@ -121,6 +121,67 @@ faithful** (so running fresh reproduces the paper). Champion config requires
 explicit overrides (see "Settled defaults" block at top of this file).
 **Output:** `results/tune_3L/paperfaithful_8seed/`.
 
+## Stage G — Honest retrospective: event-pattern prediction is not what we measured (2026-05-05)
+
+**Trigger.** While reviewing the Stage E A-champion spatial maps Giulio noticed
+that A's L=3 forecast already shows a cold-tongue pattern that does not yet
+exist in observations and that resembles the L=24 truth. The model is producing
+the right *kind* of pattern at the *wrong* time. Independent diagnosis in
+`scripts/plot_event_aligned.jl` confirms this affects all three architectures.
+
+**Event-aligned skill (W1, 8-seed ensemble means):**
+
+| Event                           | A pc | B pc | D pc | Sign correctness |
+|---------------------------------|------|------|------|------------------|
+| L=12 warm 2006-12 N3.4=+1.12    | +0.29| +0.24| +0.36| A ✓  B ✓  D ✓    |
+| **L=25 cold 2008-01 N3.4=−2.12** (the "red cannon" Giulio spotted) | **−0.27** | **+0.28** | −0.18 | **A ✗  B ✓  D ✗** |
+| L=37 cold 2009-01 N3.4=−1.19    | +0.18| +0.05| +0.16| A ✓  B ✗  D ✓    |
+| L=48 warm 2009-12 N3.4=+1.84    | −0.11| −0.10| −0.07| A ✗  B ✗  D ✗    |
+| L=60 cold 2010-12 N3.4=−2.12    | +0.08| +0.06| −0.04| A ✓  B ✗  D ✓    |
+| L=71 cold 2011-11 N3.4=−1.40    | +0.02| −0.04| −0.04| A ✓  B ✗  D ✓    |
+| **Total sign correctness**       |      |      |      | **A 4/6  B 2/6  D 4/6** |
+| Mean event pc                    | 0.04 | 0.08 | 0.05 |                  |
+
+**Honest conclusion.** Stage E's verdict (A wins 12-mo ACC, p=0.016) is
+correct for the benchmark we used, but the benchmark is a poor proxy for
+the goal we actually care about. The 12-month ACC window covers only L=12
+— the warm event extending out of training conditions, which all three
+architectures get right by trivial extrapolation. The actual ENSO events
+of W1 (L=25, 48, 60, 71) all happen *outside* the headline window, and
+**every architecture's pattern correlation at events is essentially zero
+(0.04–0.08)**. None of A, B, D predicts events at their right time.
+
+**Three structural failures (in severity order):**
+
+1. **Training objective ≠ desired objective.** Ridge regression
+   (`fit_ridge_regression`, `src/dynamics/single_layer.jl:123–146`)
+   targets the next-step state. There is no pressure during training to
+   produce correct spatial patterns at lead 12, 18, or 24 months.
+   Long-horizon performance emerges from closed-loop stability, which
+   is incidental, not optimized.
+2. **Evaluation metric doesn't span events.** ACC@12mo of the
+   Niño 3.4 *index* is a 12-element correlation that mostly tests how
+   well the model extends the initial state. It hides spatial mistakes
+   (a forecast can have correct box-mean and entirely wrong pattern, see
+   A at L=25). It also doesn't probe events that occur at L=20+.
+3. **Closed-loop divergence is fast and architecture-agnostic.** Around
+   L=12–18 mo, all archs lose phase coherence with truth. The slow band's
+   warmed-up pattern keeps cycling out, decoupled from real-world timing.
+
+**Stage G plan (in `~/.claude/plans/parsed-chasing-whale.md`):** redefine
+metric (event-pattern skill with phase tolerance) and training objective
+(multi-horizon ridge), establish baselines (climatology, persistence,
+damped persistence), then re-rank A/B/D under the new metric. Decision
+gate: if no architecture decisively beats damped persistence, project's
+deliverable becomes a careful negative result with corrected methodology.
+
+**Files.** `scripts/plot_event_aligned.jl` (event detector + per-event
+maps), `stage_E_event_aligned.png`, `stage_E_phase_diag.png`. Sign-/pc-
+table reproduced by re-running the script. Pixel-aspect cosmetics fixed
+in commit `fa7ad62` (panels 720×280 → cells render as 6×6 px squares).
+
+---
+
 ## Stage E — Decisive comparison: frequency-band vs timescale multiscale (2026-04-30)
 
 **Question:** which is the better temporal-multiscale architecture for ENSO —

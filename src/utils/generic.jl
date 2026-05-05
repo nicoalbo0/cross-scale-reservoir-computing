@@ -300,3 +300,175 @@ function rmse_upto(data::AbstractMatrix, pred::AbstractMatrix;
 
     return sqrt(sse / (ncoords * T′))
 end
+
+# ============================================================================
+# Stage G — event-pattern skill metrics
+# ============================================================================
+
+"""
+    find_enso_events(n34::AbstractVector;
+                     n_events = 6, threshold = 1.0, min_separation = 6) -> Vector{Int}
+
+Greedy event detector for the ENSO Niño 3.4 index. Picks the strongest
+|N3.4| local maxima with at least `min_separation` months between them, up to
+`n_events` total. Only events with |n34| ≥ `threshold` are considered.
+
+Reproduces the post-hoc detection rule from `scripts/plot_event_aligned.jl`,
+formalized for use in `event_skill`.
+"""
+function find_enso_events(n34::AbstractVector{<:Real};
+                          n_events::Integer = 6,
+                          threshold::Real = 1.0,
+                          min_separation::Integer = 6)
+    order = sortperm(abs.(n34); rev = true)
+    events = Int[]
+    for i in order
+        abs(n34[i]) ≥ threshold || continue
+        all(abs(i - e) > min_separation for e in events) || continue
+        push!(events, i)
+        length(events) ≥ n_events && break
+    end
+    sort!(events)
+    return events
+end
+
+"""
+    phase_aligned_pc(field_true_3d, field_pred_3d, t_event;
+                     phase_tol = 3) -> (best_pc, best_offset)
+
+Pattern correlation between `field_true_3d[:, :, t_event]` and the
+forecast at any time `t_event + δ` for `δ ∈ -phase_tol:phase_tol`,
+returning the maximum (best_pc) and the offset that achieves it. Allows
+the forecast a phase tolerance of ±`phase_tol` months — a forecast that
+predicts the event a quarter early or late still scores as a correct
+spatial pattern, but a year off does not.
+"""
+function phase_aligned_pc(field_true::AbstractArray{<:Real, 3},
+                          field_pred::AbstractArray{<:Real, 3},
+                          t_event::Integer;
+                          phase_tol::Integer = 3)
+    nt = size(field_true, 3)
+    @assert size(field_pred, 3) == nt "true / pred time-axis mismatch"
+    truth_t = vec(@view field_true[:, :, t_event])
+    am = truth_t .- mean(truth_t)
+    norm_am = norm(am)
+    best_pc = -Inf
+    best_off = 0
+    for δ in -phase_tol:phase_tol
+        t = t_event + δ
+        (1 ≤ t ≤ nt) || continue
+        pred_t = vec(@view field_pred[:, :, t])
+        bm = pred_t .- mean(pred_t)
+        denom = norm_am * norm(bm) + eps()
+        pc = dot(am, bm) / denom
+        if pc > best_pc
+            best_pc = pc
+            best_off = δ
+        end
+    end
+    return (best_pc = best_pc, best_offset = best_off)
+end
+
+"""
+    event_skill(n34_true, field_true, n34_pred, field_pred;
+                lead_window=(10, 20), phase_tol=3,
+                event_threshold=1.0, min_separation=6,
+                false_alarm_threshold=1.0) -> NamedTuple
+
+Event-pattern skill for an ENSO forecast. Identifies events in `n34_true`
+inside the lead window, then for each event computes phase-aligned pattern
+correlation, sign correctness, and counts forecast peaks that don't
+correspond to real events (false alarms). Returns a NamedTuple:
+
+- `events_true`        : event months (within `lead_window`) detected in truth
+- `sign_correct`       : per-event Bool (forecast n34 has correct sign at the
+                         best phase-aligned offset)
+- `best_pc`            : per-event max pattern correlation within ±phase_tol
+- `best_offset`        : per-event phase offset where pc maximum
+- `false_alarms`       : count of forecast |n34| peaks > false_alarm_threshold
+                         within `lead_window` that aren't within phase_tol of a
+                         truth event
+- `sign_accuracy`      : fraction of events with correct sign
+- `mean_event_pc`      : mean of `best_pc`
+- `weighted_event_pc`  : `best_pc` weighted by |n34_true[event]|
+- `phase_bias_mean`    : mean signed offset (negative = forecast leads truth)
+
+Always pair `mean_event_pc` with `sign_accuracy` and `false_alarms` —
+high pc with low sign accuracy means the model has the spatial pattern
+flipped at events; low false alarms with low pc means the model is too
+quiet to forecast anything.
+"""
+function event_skill(n34_true::AbstractVector{<:Real},
+                     field_true::AbstractArray{<:Real, 3},
+                     n34_pred::AbstractVector{<:Real},
+                     field_pred::AbstractArray{<:Real, 3};
+                     lead_window::Tuple{Int, Int} = (10, 20),
+                     phase_tol::Integer = 3,
+                     event_threshold::Real = 1.0,
+                     min_separation::Integer = 6,
+                     false_alarm_threshold::Real = 1.0)
+    nt = length(n34_true)
+    @assert length(n34_pred) == nt
+    @assert size(field_true, 3) == nt
+    @assert size(field_pred, 3) == nt
+
+    lo, hi = lead_window
+    @assert lo ≥ 1 && hi ≤ nt
+
+    # Detect events in the truth restricted to the lead window
+    candidate_events = find_enso_events(n34_true; n_events = nt,
+                                         threshold = event_threshold,
+                                         min_separation = min_separation)
+    events = filter(t -> lo ≤ t ≤ hi, candidate_events)
+
+    n_events = length(events)
+    sign_correct = falses(n_events)
+    best_pc       = fill(NaN, n_events)
+    best_offset   = zeros(Int, n_events)
+
+    for (k, t_event) in enumerate(events)
+        r = phase_aligned_pc(field_true, field_pred, t_event; phase_tol = phase_tol)
+        best_pc[k]     = r.best_pc
+        best_offset[k] = r.best_offset
+        # Sign correctness: forecast n34 at the best-offset month has same sign
+        # as truth at the event.
+        t_pred = t_event + r.best_offset
+        sign_correct[k] = sign(n34_pred[t_pred]) == sign(n34_true[t_event])
+    end
+
+    # False alarms: count forecast n34 peaks (local maxima of |n34_pred|)
+    # within `lead_window` whose nearest truth event is more than `phase_tol`
+    # months away. Implementation: greedy, using the same threshold rule.
+    forecast_peaks = find_enso_events(n34_pred; n_events = nt,
+                                       threshold = false_alarm_threshold,
+                                       min_separation = min_separation)
+    forecast_peaks_in_window = filter(t -> lo ≤ t ≤ hi, forecast_peaks)
+    false_alarms = 0
+    for fp in forecast_peaks_in_window
+        if isempty(events) || minimum(abs.(events .- fp)) > phase_tol
+            false_alarms += 1
+        end
+    end
+
+    sign_accuracy   = n_events > 0 ? sum(sign_correct) / n_events : NaN
+    mean_event_pc   = n_events > 0 ? mean(best_pc) : NaN
+    weights = n_events > 0 ? abs.(n34_true[events]) : Float64[]
+    weighted_event_pc = if n_events > 0 && sum(weights) > 0
+        sum(best_pc .* weights) / sum(weights)
+    else
+        NaN
+    end
+    phase_bias_mean = n_events > 0 ? mean(best_offset) : NaN
+
+    return (events_true       = events,
+            sign_correct       = sign_correct,
+            best_pc            = best_pc,
+            best_offset        = best_offset,
+            false_alarms       = false_alarms,
+            sign_accuracy      = sign_accuracy,
+            mean_event_pc      = mean_event_pc,
+            weighted_event_pc  = weighted_event_pc,
+            phase_bias_mean    = phase_bias_mean,
+            n_events           = n_events,
+            n_forecast_peaks   = length(forecast_peaks_in_window))
+end

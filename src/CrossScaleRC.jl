@@ -60,6 +60,9 @@ export reconstruct_bands
 export per_pixel_acc
 export forecast_headline
 export rolling_windows
+export find_enso_events
+export phase_aligned_pc
+export event_skill
 
 include("types.jl")
 include("data/loading.jl")
