@@ -1,6 +1,6 @@
 # CrossScaleRC
 
-Cross-scale reservoir computing: single- and multi-layer echo state networks with spatial blocking, for forecasting high-dimensional spatiotemporal systems (e.g. Kuramoto–Sivashinsky, sea surface temperature). Paper: https://doi.org/10.48550/arXiv.2510.11209
+Cross-scale reservoir computing: single- and multi-layer echo state networks with spatial blocking, for forecasting high-dimensional spatiotemporal systems (e.g. Kuramoto–Sivashinsky, sea surface temperature). Paper: https://doi.org/10.1016/j.neucom.2026.133849
 
 ---
 
