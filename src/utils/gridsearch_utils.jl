@@ -23,7 +23,7 @@ function grid_search(run_once, grids::AbstractDict{Symbol,<:AbstractVector};
 
     rows = Vector{Vector{Any}}()
 
-    for vals in Iterators.product(iters...)  # Cartesian product. [page:1]
+    for vals in Iterators.product(iters...)  # Cartesian product
         job_id += 1
         params = NamedTuple{Tuple(param_order)}(vals)
         progress && @info "Grid point" job_id total_jobs params
