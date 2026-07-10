@@ -4,7 +4,7 @@
 [![Julia 1.11+](https://img.shields.io/badge/Julia-1.11%2B-9558B2?logo=julia&logoColor=white)](https://julialang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Paper DOI](https://img.shields.io/badge/DOI-10.1016%2Fj.neucom.2026.133849-blue.svg)](https://doi.org/10.1016/j.neucom.2026.133849)
-[![Software DOI](https://zenodo.org/badge/1126847329.svg)](https://doi.org/10.5281/zenodo.18846959)
+[![Software DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18846959.svg)](https://doi.org/10.5281/zenodo.18846959)
 
 ![Figure 1. Cross-scale reservoir computing architecture](plots/fig1.jpg)
 
