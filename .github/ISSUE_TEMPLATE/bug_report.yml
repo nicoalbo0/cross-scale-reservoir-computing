@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible problem in CrossScaleRC.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve CrossScaleRC.
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest code example and any required input shape or configuration.
+      render: julia
+    validations:
+      required: true
+  - type: input
+    id: julia-version
+    attributes:
+      label: Julia version
+      placeholder: Output of julia --version
+    validations:
+      required: true
+  - type: input
+    id: package-version
+    attributes:
+      label: CrossScaleRC version or commit
+      placeholder: v1.0.0 or a commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste the complete error and stack trace, removing sensitive information.
+      render: shell

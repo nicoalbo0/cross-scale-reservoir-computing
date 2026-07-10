@@ -1,6 +1,29 @@
+# Generated research data
 data/kuramoto/*
 data/sst/*
 !data/**/.gitkeep
 
+# Julia environment and generated files
+# Package compatibility is defined in Project.toml; paper releases are archived on Zenodo.
+/Manifest.toml
+LocalPreferences.toml
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+/coverage/
+lcov.info
+/docs/build/
+
+# Editor and IDE files
+.idea/
+.vscode/
+*.swp
+*~
+
+# Operating-system metadata
 .DS_Store
 /data/.DS_Store
+Thumbs.db
+
+# Local paper files
+*.pdf
