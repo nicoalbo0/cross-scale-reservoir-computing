@@ -24,7 +24,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 julia = "1.11"
-CSV = "0.10.15"
+CSV = "0.10.15, 1.0"
 DataFrames = "1.8.1"
 DelimitedFiles = "1.9.1"
 FFTW = "1.10.0"
